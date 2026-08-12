@@ -765,7 +765,6 @@ pub async fn finish_ghost_download(
                     filename,
                 },
             );
-            emit_ui(&app, "mod-installed", ());
             Ok(())
         }
         Err(e) => {

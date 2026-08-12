@@ -12,6 +12,9 @@ import { InstallPromptModal } from "./components/InstallPromptModal";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { WindowControls } from "./components/WindowControls";
 import { WhatsNewModal } from "./components/WhatsNewModal";
+import { DropZone } from "./components/DropZone";
+import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+import { tauriHandle } from "./lib/tauri";
 import { SessionWarningModal } from "./components/SessionWarningModal";
 import { VariantPickerModal } from "./components/VariantPickerModal";
 import { extractUrlFromDeepLink } from "./lib/deepLink";
@@ -131,6 +134,18 @@ function AppShell() {
       unlisteners.forEach((fn) => fn());
     };
   }, [loadMods]);
+
+  // Mirror the queue onto the taskbar icon, so a long download can be watched
+  // without keeping the window in front.
+  useEffect(() => {
+    tauriHandle(getCurrentWindow)
+      ?.setProgressBar({
+        status: activeJobCount > 0 ? ProgressBarStatus.Indeterminate : ProgressBarStatus.None,
+      })
+      .catch(() => {
+        // The platform has no taskbar progress.
+      });
+  }, [activeJobCount]);
 
   // ─── Keyboard shortcuts ─────────────────────────────────
   useEffect(() => {
@@ -265,6 +280,8 @@ function AppShell() {
       <VariantPickerModal />
 
       <WhatsNewModal />
+
+      <DropZone />
     </div>
   );
 }

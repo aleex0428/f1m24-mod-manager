@@ -23,8 +23,8 @@ import { CompatibilityView } from "../components/CompatibilityView";
 import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
 import { useMods } from "../hooks/useMods";
-import { useModStore } from "../store/modStore";
-import type { ConflictStanding, InstallOutcome, UpdateAvailable } from "../types";
+import { installLocalFile } from "../lib/install";
+import type { ConflictStanding, UpdateAvailable } from "../types";
 
 export function Library() {
   const {
@@ -128,29 +128,11 @@ export function Library() {
     const path = typeof file === "string" ? file : (file as { path: string }).path;
 
     setInstalling(true);
-    const toastId = toast.loading("Installing mod…");
-    try {
-      const outcome = await invoke<InstallOutcome>("install_mod", { zipPath: path });
-
-      if (outcome.kind === "needsVariant") {
-        // The archive ships alternatives; the modal takes it from here.
-        toast.dismiss(toastId);
-        useModStore.getState().setPendingVariant({
-          stagingId: outcome.stagingId,
-          title: path.split(/[\\/]/).pop() ?? "This archive",
-          variants: outcome.variants,
-        });
-        return;
-      }
-
-      await loadMods();
-      toast.success("Mod installed", { id: toastId });
-    } catch (err) {
-      toast.error(`Install failed: ${err}`, { id: toastId });
-    } finally {
-      setInstalling(false);
-    }
-  }, [loadMods]);
+    // Same path as dropping a file on the window, including the variant
+    // question. The library refreshes from the backend's mod-installed event.
+    await installLocalFile(path);
+    setInstalling(false);
+  }, []);
 
   const handleCheckUpdates = useCallback(async () => {
     setCheckingUpdates(true);

@@ -39,6 +39,15 @@ All notable changes to F1M24 Mod Manager are documented here.
 - **A "what's new" panel after updating**, so a silent background update no
   longer changes things without saying what.
 
+- **Drop a mod on the window to install it.** Dragging a .zip, .rar, .7z or
+  .pak onto the app installs it, several at a time if you like — including the
+  question about which version to use when the archive holds alternatives.
+- **Download progress on the taskbar icon**, so a large mod can be watched
+  without keeping the window in front.
+- **Act on a mod from its details.** The panel used to be read-only: enabling,
+  updating and uninstalling now happen there instead of closing it and hunting
+  for the row again.
+
 ### Improved
 
 - **Toggling a mod writes 5 KB instead of 227 KB.** The scraped catalogue moved

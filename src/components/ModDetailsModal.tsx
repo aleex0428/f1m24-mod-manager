@@ -1,16 +1,34 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { BackgroundBlur } from "./BackgroundBlur";
-import { formatDate } from "../lib/format";
-import type { Mod } from "../types";
+import { formatBytes, formatDate } from "../lib/format";
+import type { Mod, UpdateAvailable } from "../types";
 
 interface ModDetailsModalProps {
   mod: Mod;
   isOpen: boolean;
   onClose: () => void;
+  update?: UpdateAvailable;
+  onToggle?: (id: string, enabled: boolean) => void;
+  onDelete?: (id: string) => void;
+  onUpdate?: (update: UpdateAvailable) => void;
 }
 
-export function ModDetailsModal({ mod, isOpen, onClose }: ModDetailsModalProps) {
+export function ModDetailsModal({
+  mod,
+  isOpen,
+  onClose,
+  update,
+  onToggle,
+  onDelete,
+  onUpdate,
+}: ModDetailsModalProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setConfirmDelete(false);
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -95,7 +113,10 @@ export function ModDetailsModal({ mod, isOpen, onClose }: ModDetailsModalProps) 
 
           <dl className="mt-6 grid grid-cols-2 gap-3">
             <Detail label="Installed" value={formatDate(mod.installedAt) || "Unknown"} />
-            <Detail label="Source" value={mod.sourceUrl ? "Overtake.gg" : "Local file"} />
+            <Detail
+              label="Size on disk"
+              value={mod.sizeBytes > 0 ? formatBytes(mod.sizeBytes) : "—"}
+            />
             <Detail
               label="Pakchunks"
               value={mod.pakchunks.length ? mod.pakchunks.join(", ") : "None detected"}
@@ -129,6 +150,59 @@ export function ModDetailsModal({ mod, isOpen, onClose }: ModDetailsModalProps) 
             </button>
           )}
         </div>
+
+        {/* Acting on what you are looking at, instead of closing this and
+            hunting for the row again. */}
+        {(onToggle || onDelete) && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-border px-6 py-4">
+            {onToggle && (
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <span className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={mod.enabled}
+                    onChange={(e) => onToggle(mod.id, e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </span>
+                <span className="text-sm text-text-secondary">
+                  {mod.enabled ? "Active" : "Disabled"}
+                </span>
+              </label>
+            )}
+
+            <div className="ml-auto flex items-center gap-2">
+              {update && onUpdate && (
+                <button
+                  onClick={() => {
+                    onUpdate(update);
+                    onClose();
+                  }}
+                  className="btn-primary !py-2 !text-xs"
+                >
+                  Update to {update.newVersion}
+                </button>
+              )}
+
+              {onDelete && (
+                <button
+                  onClick={() => {
+                    if (!confirmDelete) {
+                      setConfirmDelete(true);
+                      return;
+                    }
+                    onDelete(mod.id);
+                    onClose();
+                  }}
+                  onBlur={() => setConfirmDelete(false)}
+                  className={`!py-2 !text-xs ${confirmDelete ? "btn-primary" : "btn-danger"}`}
+                >
+                  {confirmDelete ? "Click again to remove" : "Uninstall"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

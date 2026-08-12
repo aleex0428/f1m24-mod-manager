@@ -315,6 +315,7 @@ pub async fn install_mod(
         source_url,
         replaced,
         state,
+        &app_handle,
     )?;
 
     if let Some(dir) = &temp_extract_dir {
@@ -334,6 +335,7 @@ fn install_groups(
     source_url: Option<String>,
     replaced: Option<(String, i32)>,
     state: State<AppState>,
+    app: &tauri::AppHandle,
 ) -> Result<String, String> {
     let replaced_mod_id = replaced.as_ref().map(|(id, _)| id.clone());
 
@@ -432,6 +434,11 @@ fn install_groups(
         conn.data.mods.insert(mod_id.clone(), record);
         conn.save()?;
     }
+
+    // Single owner of this event: whoever triggered the install — a button, a
+    // dropped file or a finished download — gets the library refreshed without
+    // having to ask for it.
+    crate::downloader::emit_ui(app, "mod-installed", ());
 
     Ok(mod_id)
 }
@@ -698,6 +705,7 @@ pub fn resolve_install_variant(
         pending.source_url.clone(),
         replaced,
         state,
+        &app,
     );
 
     match result {
@@ -706,9 +714,6 @@ pub fn resolve_install_variant(
                 crate::downloader::store_archive(&app, archive);
             }
             cleanup_pending(&pending);
-            // Always: an install started from a local file has no download job
-            // to carry this event, and the library would not refresh.
-            crate::downloader::emit_ui(&app, "mod-installed", ());
             crate::downloader::finish_pending_job(&app, &pending, None);
             Ok(mod_id)
         }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { tauriHandle } from "../lib/tauri";
 
 /**
  * Minimise / maximise / close, drawn inside the app header now that the system
@@ -13,11 +14,7 @@ export function WindowControls() {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    try {
-      setAppWindow(getCurrentWindow());
-    } catch {
-      // Not running inside Tauri (e.g. a browser preview): render nothing.
-    }
+    setAppWindow(tauriHandle(getCurrentWindow));
   }, []);
 
   useEffect(() => {

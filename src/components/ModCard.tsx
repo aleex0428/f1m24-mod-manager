@@ -272,7 +272,15 @@ function ModCardBase({
       </div>
 
       {isDetailsOpen && (
-        <ModDetailsModal mod={mod} isOpen onClose={() => setIsDetailsOpen(false)} />
+        <ModDetailsModal
+          mod={mod}
+          isOpen
+          onClose={() => setIsDetailsOpen(false)}
+          update={update}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          onUpdate={onUpdate}
+        />
       )}
     </>
   );
