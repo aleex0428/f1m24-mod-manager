@@ -102,9 +102,16 @@ pakchunk99-WindowsNoEditor_300_P.pak.disabled  disabled
   thing in game. The first attempt looked for name clashes and detected nothing
   on real mods. The extraction is parked in `AppState.pending_installs`, the UI
   asks, and `resolve_install_variant` finishes it.
-- Sibling folders are sometimes parts of one mod rather than alternatives, and
-  nothing in the archive says which. The picker therefore always offers
-  "install every folder" (`VARIANT_ALL`), so the guess is never destructive.
+- Alternatives are also shipped loose in one folder, with no layout to go by.
+  There the signal is the pakchunk: two `.pak` files claiming the same chunk
+  cannot both apply — the same clash `detect_conflicts` reports between
+  installed mods. Picking one keeps every uncontested file, since those are
+  shared parts rather than options.
+- Sibling folders and same-chunk files are sometimes parts of one mod rather
+  than alternatives, and nothing in the archive says which. The picker
+  therefore always offers "install everything" (`VARIANT_ALL`), so the guess
+  is never destructive.
+- Variant ids carry their kind: `dir:<path>`, `pak:<base>` or `*`.
 - A single-folder mod and a multi-part mod (`.pak` + `.ucas` + `.utoc`) must
   never trigger the picker; there are tests for both, and for the real
   leaderboard archive shape.

@@ -28,8 +28,12 @@ const MOD_EXTS: [&str; 4] = ["pak", "ucas", "utoc", "sig"];
 /// Extensions that mean "this archive ships a program", not a mod.
 const APP_EXTS: [&str; 3] = ["exe", "msi", "dll"];
 const DISABLED_SUFFIX: &str = ".disabled";
-/// Variant id meaning "take every folder in the archive".
+/// Variant id meaning "take everything in the archive".
 pub const VARIANT_ALL: &str = "*";
+/// Prefix for a variant that is a folder inside the archive.
+const VARIANT_DIR: &str = "dir:";
+/// Prefix for a variant that is a single mod file among loose alternatives.
+const VARIANT_PAK: &str = "pak:";
 
 // ─── Data types ──────────────────────────────────────────────────
 
@@ -438,48 +442,139 @@ fn detect_variants(
         }
     }
 
-    if dirs_with_pak.len() < 2 {
-        return Vec::new();
-    }
-
-    let dirs: Vec<String> = dirs_with_pak.into_iter().collect();
-    let prefix = common_prefix(&dirs);
-
-    let mut variants: Vec<InstallVariant> = dirs
-        .into_iter()
-        .map(|dir| {
-            let mut files = by_dir.remove(&dir).unwrap_or_default();
-            files.sort();
-
-            let label = dir
-                .split('/')
-                .skip(prefix.len())
-                .collect::<Vec<_>>()
-                .join("/");
-
-            InstallVariant {
-                label: if label.is_empty() {
-                    "Archive root".to_string()
-                } else {
-                    label
-                },
-                id: dir,
-                files,
-            }
-        })
-        .collect();
-
-    // Sibling folders are *usually* alternatives, but some archives split one
-    // mod into parts. Offering "all" means the guess is never destructive.
     every_file.sort();
     every_file.dedup();
+
+    let mut variants: Vec<InstallVariant> = if dirs_with_pak.len() >= 2 {
+        // Alternatives in sibling folders — the common case.
+        let dirs: Vec<String> = dirs_with_pak.into_iter().collect();
+        let prefix = common_prefix(&dirs);
+
+        dirs.into_iter()
+            .map(|dir| {
+                let mut files = by_dir.remove(&dir).unwrap_or_default();
+                files.sort();
+
+                let label = dir.split('/').skip(prefix.len()).collect::<Vec<_>>().join("/");
+
+                InstallVariant {
+                    label: if label.is_empty() {
+                        "Archive root".to_string()
+                    } else {
+                        label
+                    },
+                    id: format!("{VARIANT_DIR}{dir}"),
+                    files,
+                }
+            })
+            .collect()
+    } else {
+        // Alternatives dumped loose in one folder. Nothing about the layout
+        // gives them away, but two files claiming the same pakchunk cannot
+        // both win — that is the same clash the conflict detector reports
+        // between installed mods, so it is a reliable signal here too.
+        let contested = contested_groups(groups);
+        if contested.len() < 2 {
+            return Vec::new();
+        }
+
+        let mut alternatives: Vec<InstallVariant> = contested
+            .iter()
+            .map(|base| {
+                let mut files: Vec<String> = groups
+                    .get(base)
+                    .map(|files| {
+                        files
+                            .iter()
+                            .map(|f| f.file_name().unwrap_or_default().to_string_lossy().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                files.sort();
+
+                InstallVariant {
+                    label: files.first().cloned().unwrap_or_else(|| base.clone()),
+                    id: format!("{VARIANT_PAK}{base}"),
+                    files,
+                }
+            })
+            .collect();
+
+        alternatives.sort_by(|a, b| a.label.cmp(&b.label));
+        alternatives
+    };
+
+    // Sibling folders and same-chunk files are *usually* alternatives, but an
+    // archive can also be one mod split into parts, and nothing distinguishes
+    // the two. Offering "all" keeps the guess from ever losing files.
     variants.push(InstallVariant {
         id: VARIANT_ALL.to_string(),
-        label: "Install every folder".to_string(),
+        label: "Install everything".to_string(),
         files: every_file,
     });
 
     variants
+}
+
+/// Groups whose `.pak` claims a pakchunk another group also claims. Two mods
+/// on the same chunk cannot both apply, so inside one archive they are
+/// alternatives rather than parts.
+fn contested_groups(groups: &HashMap<String, Vec<PathBuf>>) -> std::collections::BTreeSet<String> {
+    let mut owners: HashMap<i64, Vec<String>> = HashMap::new();
+
+    for (base, files) in groups {
+        let names: Vec<String> = files
+            .iter()
+            .filter(|f| has_ext(f, "pak"))
+            .map(|f| f.file_name().unwrap_or_default().to_string_lossy().to_string())
+            .collect();
+
+        for chunk in extract_pakchunks(&names) {
+            owners.entry(chunk).or_default().push(base.clone());
+        }
+    }
+
+    owners
+        .into_values()
+        .filter(|bases| bases.len() > 1)
+        .flatten()
+        .collect()
+}
+
+/// Narrow an extraction down to the variant the user picked.
+fn select_variant(
+    staging_dir: &Path,
+    groups: HashMap<String, Vec<PathBuf>>,
+    variant: &str,
+) -> HashMap<String, Vec<PathBuf>> {
+    if variant == VARIANT_ALL {
+        return groups;
+    }
+
+    if let Some(dir) = variant.strip_prefix(VARIANT_DIR) {
+        return groups
+            .into_iter()
+            .filter_map(|(base, files)| {
+                let kept: Vec<PathBuf> = files
+                    .into_iter()
+                    .filter(|f| relative_dir(staging_dir, f) == dir)
+                    .collect();
+                (!kept.is_empty()).then_some((base, kept))
+            })
+            .collect();
+    }
+
+    if let Some(chosen) = variant.strip_prefix(VARIANT_PAK) {
+        // Keep the chosen alternative plus everything that was never in
+        // competition: those are shared parts, not options.
+        let contested = contested_groups(&groups);
+        return groups
+            .into_iter()
+            .filter(|(base, _)| base == chosen || !contested.contains(base))
+            .collect();
+    }
+
+    groups
 }
 
 /// Finish a parked install with the folder the user picked.
@@ -507,22 +602,21 @@ pub fn resolve_install_variant(
 
     // Re-scan rather than carrying paths around: the staging directory is the
     // single source of truth and cannot go stale.
-    let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut all_groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for entry in WalkDir::new(&pending.staging_dir).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         if !path.is_file() {
-            continue;
-        }
-        if variant != VARIANT_ALL && relative_dir(&pending.staging_dir, path) != variant {
             continue;
         }
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
         if let Some(base) = base_of(name) {
-            groups.entry(base).or_default().push(path.to_path_buf());
+            all_groups.entry(base).or_default().push(path.to_path_buf());
         }
     }
+
+    let groups = select_variant(&pending.staging_dir, all_groups, &variant);
 
     if !groups.values().any(|files| files.iter().any(|f| has_ext(f, "pak"))) {
         cleanup_pending(&pending);
@@ -972,7 +1066,7 @@ mod tests {
         let (dir, groups) = staged(&["Option A/pakchunk50.pak", "Option B/pakchunk50.pak"]);
         let variants = detect_variants(&dir, &groups);
 
-        assert_eq!(labels(&variants), vec!["Option A", "Option B", "Install every folder"]);
+        assert_eq!(labels(&variants), vec!["Option A", "Option B", "Install everything"]);
         assert_eq!(variants[0].files, vec!["pakchunk50.pak"]);
         assert_eq!(variants.last().unwrap().id, VARIANT_ALL);
 
@@ -994,7 +1088,7 @@ mod tests {
         // The wrapper folder every option shares is stripped from the labels.
         assert_eq!(
             labels(&variants),
-            vec!["COLORED VERSION", "WHITE VERSION", "Install every folder"]
+            vec!["COLORED VERSION", "WHITE VERSION", "Install everything"]
         );
         assert!(variants[0].id.ends_with("COLORED VERSION"), "got {}", variants[0].id);
 
@@ -1008,10 +1102,47 @@ mod tests {
         let (dir, groups) = staged(&["Cars/pakchunk50.pak", "Tracks/pakchunk60.pak"]);
         let variants = detect_variants(&dir, &groups);
 
-        assert_eq!(labels(&variants), vec!["Cars", "Tracks", "Install every folder"]);
+        assert_eq!(labels(&variants), vec!["Cars", "Tracks", "Install everything"]);
         let all = variants.last().unwrap();
         assert_eq!(all.files, vec!["pakchunk50.pak", "pakchunk60.pak"]);
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn offers_a_choice_for_loose_files_on_the_same_pakchunk() {
+        // No folders to go by, but two files claiming pakchunk 50 cannot both
+        // apply, so they are alternatives however they are laid out.
+        let (dir, groups) = staged(&[
+            "pakchunk50-Red_P.pak",
+            "pakchunk50-Blue_P.pak",
+            "pakchunk60-Shared_P.pak",
+        ]);
+        let variants = detect_variants(&dir, &groups);
+
+        assert_eq!(
+            labels(&variants),
+            vec!["pakchunk50-Blue_P.pak", "pakchunk50-Red_P.pak", "Install everything"]
+        );
+
+        // Picking one keeps the uncontested file: it is a part, not an option.
+        let chosen = select_variant(&dir, groups, &variants[0].id);
+        let mut kept: Vec<String> = chosen
+            .values()
+            .flatten()
+            .map(|f| f.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        kept.sort();
+        assert_eq!(kept, vec!["pakchunk50-Blue_P.pak", "pakchunk60-Shared_P.pak"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parts_on_different_pakchunks_are_not_a_choice() {
+        // A mod split across chunks installs whole, without asking.
+        let (dir, groups) = staged(&["Mod/pakchunk50-A_P.pak", "Mod/pakchunk60-B_P.pak"]);
+        assert!(detect_variants(&dir, &groups).is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 
