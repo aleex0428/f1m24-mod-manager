@@ -97,13 +97,71 @@ struct ModFile {
 
 // ─── Commands ────────────────────────────────────────────────────
 
+/// A mod as the UI sees it: the stored record plus what it weighs right now.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModView {
+    #[serde(flatten)]
+    pub record: ModRecord,
+    /// Measured on every listing rather than stored: files are renamed on the
+    /// disk as the load order changes, and a stale number is worse than none.
+    pub size_bytes: u64,
+}
+
 /// Return all installed mods.
 #[tauri::command]
-pub fn get_mods(state: State<AppState>) -> Result<Vec<ModRecord>, String> {
+pub fn get_mods(state: State<AppState>) -> Result<Vec<ModView>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let game_path = conn.get_setting("game_path").unwrap_or_default();
+    let mut sizes: HashMap<String, u64> = HashMap::new();
+    if !game_path.trim().is_empty() {
+        for file in read_mod_files(&get_mods_dir(&game_path)) {
+            let bytes = fs::metadata(&file.path).map(|m| m.len()).unwrap_or(0);
+            *sizes.entry(file.base).or_default() += bytes;
+        }
+    }
+
     let mut mods: Vec<ModRecord> = conn.data.mods.values().cloned().collect();
     mods.sort_by_key(|m| m.load_order);
-    Ok(mods)
+
+    Ok(mods
+        .into_iter()
+        .map(|record| {
+            let size_bytes = record
+                .installed_filenames
+                .iter()
+                .filter_map(|name| base_of(name))
+                .filter_map(|base| sizes.get(&base).copied())
+                .sum();
+            ModView { record, size_bytes }
+        })
+        .collect())
+}
+
+/// Enable or disable every installed mod at once.
+///
+/// A per-mod loop from the UI would be one IPC round-trip and one library write
+/// each; this is a single pass.
+#[tauri::command]
+pub fn set_all_mods_enabled(enabled: bool, state: State<AppState>) -> Result<usize, String> {
+    let ids: Vec<String> = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.data
+            .mods
+            .values()
+            .filter(|m| m.enabled != enabled)
+            .map(|m| m.id.clone())
+            .collect()
+    };
+
+    let mut changed = 0;
+    for id in ids {
+        if toggle_mod(id, enabled, state.clone()).is_ok() {
+            changed += 1;
+        }
+    }
+    Ok(changed)
 }
 
 /// Install a mod from an archive (.zip/.rar/.7z) or a bare .pak file.

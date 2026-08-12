@@ -24,7 +24,7 @@ import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
 import { useMods } from "../hooks/useMods";
 import { useModStore } from "../store/modStore";
-import type { InstallOutcome, UpdateAvailable } from "../types";
+import type { ConflictStanding, InstallOutcome, UpdateAvailable } from "../types";
 
 export function Library() {
   const {
@@ -47,6 +47,13 @@ export function Library() {
   const [query, setQuery] = useState("");
   const [showConflicts, setShowConflicts] = useState(false);
   const orderSignature = useRef("");
+  const filterRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focus = () => filterRef.current?.select();
+    window.addEventListener("app:focus-search", focus);
+    return () => window.removeEventListener("app:focus-search", focus);
+  }, []);
 
   // Re-sync the local drag order only when the set of mods really changed,
   // so an unrelated store update cannot silently discard a pending reorder.
@@ -75,6 +82,35 @@ export function Library() {
     });
     setHasUnappliedChanges(true);
   }, []);
+
+  const handleMove = useCallback((id: string, direction: "up" | "down") => {
+    setLocalOrder((prev) => {
+      const from = prev.indexOf(id);
+      const to = direction === "up" ? from - 1 : from + 1;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      return arrayMove(prev, from, to);
+    });
+    setHasUnappliedChanges(true);
+  }, []);
+
+  const handleSetAll = useCallback(
+    async (enabled: boolean) => {
+      const toastId = toast.loading(enabled ? "Enabling every mod…" : "Disabling every mod…");
+      try {
+        const changed = await invoke<number>("set_all_mods_enabled", { enabled });
+        await loadMods();
+        toast.success(
+          changed === 0
+            ? "Nothing to change"
+            : `${changed} mod${changed === 1 ? "" : "s"} ${enabled ? "enabled" : "disabled"}`,
+          { id: toastId }
+        );
+      } catch (err) {
+        toast.error(String(err), { id: toastId });
+      }
+    },
+    [loadMods]
+  );
 
   const handleApplyOrder = useCallback(async () => {
     await applyLoadOrder(localOrder);
@@ -149,17 +185,32 @@ export function Library() {
   // ─── Derived data ─────────────────────────────────────────
   const modsById = useMemo(() => new Map(mods.map((m) => [m.id, m])), [mods]);
 
-  const conflictChunksByMod = useMemo(() => {
-    const map = new Map<string, number[]>();
+  // Who actually applies. The winner is whichever contender sits highest in
+  // the *applied* order, so this reads loadOrder rather than the local drag
+  // order: until Apply is pressed, the game still sees the old arrangement.
+  const standingByMod = useMemo(() => {
+    const map = new Map<string, ConflictStanding>();
+    const order = new Map(mods.map((m) => [m.id, m.loadOrder]));
+    const names = new Map(mods.map((m) => [m.id, m.name]));
+    const enabled = new Set(mods.filter((m) => m.enabled).map((m) => m.id));
+
     for (const conflict of conflicts) {
-      for (const id of conflict.mods) {
-        const list = map.get(id);
-        if (list) list.push(conflict.pakchunk);
-        else map.set(id, [conflict.pakchunk]);
+      const contenders = conflict.mods.filter((id) => enabled.has(id));
+      if (contenders.length < 2) continue;
+
+      const winner = contenders.reduce((best, id) =>
+        (order.get(id) ?? 0) < (order.get(best) ?? 0) ? id : best
+      );
+
+      for (const id of contenders) {
+        const entry = map.get(id) ?? { chunks: [] };
+        entry.chunks.push(conflict.pakchunk);
+        if (id !== winner) entry.overriddenBy = names.get(winner);
+        map.set(id, entry);
       }
     }
     return map;
-  }, [conflicts]);
+  }, [conflicts, mods]);
 
   const updatesByMod = useMemo(
     () => new Map(updates.map((u) => [u.modId, u])),
@@ -219,11 +270,32 @@ export function Library() {
                 />
               </svg>
               <input
+                ref={filterRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter…"
                 className="input !w-44 !py-2 !pl-9 !text-sm"
               />
+            </div>
+          )}
+
+          {mods.length > 1 && (
+            <div className="flex overflow-hidden rounded-xl border border-border">
+              <button
+                onClick={() => handleSetAll(true)}
+                className="px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                title="Enable every installed mod"
+              >
+                Enable all
+              </button>
+              <span className="w-px bg-border" />
+              <button
+                onClick={() => handleSetAll(false)}
+                className="px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                title="Disable every installed mod — handy before a game update"
+              >
+                Disable all
+              </button>
             </div>
           )}
 
@@ -321,19 +393,25 @@ export function Library() {
               disabled={isFiltered}
             >
               <div className="space-y-2.5 pb-4">
-                {orderedMods.map((mod) => (
-                  <ModCard
-                    key={mod.id}
-                    mod={mod}
-                    position={localOrder.indexOf(mod.id) + 1}
-                    conflictChunks={conflictChunksByMod.get(mod.id) ?? []}
-                    update={updatesByMod.get(mod.id)}
-                    onToggle={toggleMod}
-                    onDelete={deleteMod}
-                    onUpdate={handleUpdate}
-                    onOpenFolder={handleOpenFolder}
-                  />
-                ))}
+                {orderedMods.map((mod) => {
+                  const position = localOrder.indexOf(mod.id);
+                  return (
+                    <ModCard
+                      key={mod.id}
+                      mod={mod}
+                      position={position + 1}
+                      isFirst={position === 0}
+                      isLast={position === localOrder.length - 1}
+                      standing={standingByMod.get(mod.id)}
+                      update={updatesByMod.get(mod.id)}
+                      onToggle={toggleMod}
+                      onDelete={deleteMod}
+                      onUpdate={handleUpdate}
+                      onOpenFolder={handleOpenFolder}
+                      onMove={isFiltered ? undefined : handleMove}
+                    />
+                  );
+                })}
               </div>
             </SortableContext>
           </DndContext>

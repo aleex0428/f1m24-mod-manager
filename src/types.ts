@@ -17,6 +17,15 @@ export interface Mod {
   loadOrder: number;
   installedAt: string;
   sourceUrl?: string;
+  /** Bytes the mod's files take in ~mods, measured at listing time. */
+  sizeBytes: number;
+}
+
+/** How a mod fares against the others claiming its pakchunks. */
+export interface ConflictStanding {
+  chunks: number[];
+  /** Name of the mod that overrides this one, when it loses. */
+  overriddenBy?: string;
 }
 
 export interface UpdateAvailable {

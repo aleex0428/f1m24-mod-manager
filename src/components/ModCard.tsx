@@ -3,30 +3,36 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ConflictBadge } from "./ConflictBadge";
 import { ModDetailsModal } from "./ModDetailsModal";
-import { formatDate } from "../lib/format";
-import type { Mod, UpdateAvailable } from "../types";
+import { formatBytes, formatDate } from "../lib/format";
+import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
 
 interface ModCardProps {
   mod: Mod;
-  /** Pakchunks this mod contests with another enabled mod. */
-  conflictChunks: number[];
+  /** How this mod fares against others claiming the same pakchunks. */
+  standing?: ConflictStanding;
   update?: UpdateAvailable;
   position: number;
+  isFirst: boolean;
+  isLast: boolean;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onUpdate?: (update: UpdateAvailable) => void;
   onOpenFolder?: () => void;
+  onMove?: (id: string, direction: "up" | "down") => void;
 }
 
 function ModCardBase({
   mod,
-  conflictChunks,
+  standing,
   update,
   position,
+  isFirst,
+  isLast,
   onToggle,
   onDelete,
   onUpdate,
   onOpenFolder,
+  onMove,
 }: ModCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: mod.id,
@@ -34,7 +40,8 @@ function ModCardBase({
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const hasConflict = conflictChunks.length > 0;
+  const contested = standing?.chunks ?? [];
+  const overriddenBy = standing?.overriddenBy;
   const thumbnail = mod.imageUrl || mod.thumbnailUrl;
 
   return (
@@ -42,7 +49,7 @@ function ModCardBase({
       <div
         ref={setNodeRef}
         style={{ transform: CSS.Transform.toString(transform), transition }}
-        className={`group relative flex items-stretch overflow-hidden rounded-2xl border bg-surface/60 transition-colors duration-200 ${
+        className={`group relative flex animate-slide-up items-stretch overflow-hidden rounded-2xl border bg-surface/60 transition-colors duration-200 ${
           mod.enabled
             ? "border-border hover:border-f1red/40"
             : "border-border-subtle opacity-70 hover:opacity-100"
@@ -74,7 +81,7 @@ function ModCardBase({
         </button>
 
         {/* Load order */}
-        <div className="flex flex-shrink-0 items-center pr-3">
+        <div className="flex flex-shrink-0 items-center gap-1 pr-3">
           <span
             className={`flex h-9 w-9 items-center justify-center rounded-lg border font-mono text-sm font-bold ${
               mod.enabled
@@ -84,6 +91,35 @@ function ModCardBase({
           >
             {position.toString().padStart(2, "0")}
           </span>
+
+          {/* Dragging is fine for a nudge; these are for moving across a long
+              list without fighting the scroll. */}
+          {onMove && (
+            <div className="flex flex-col">
+              <button
+                onClick={() => onMove(mod.id, "up")}
+                disabled={isFirst}
+                className="flex h-[18px] w-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:pointer-events-none disabled:opacity-25"
+                title="Move up"
+                aria-label="Move up"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+              <button
+                onClick={() => onMove(mod.id, "down")}
+                disabled={isLast}
+                className="flex h-[18px] w-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:pointer-events-none disabled:opacity-25"
+                title="Move down"
+                aria-label="Move down"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Thumbnail */}
@@ -136,7 +172,17 @@ function ModCardBase({
                 Update {update.newVersion}
               </span>
             )}
-            {hasConflict && <ConflictBadge chunks={conflictChunks} />}
+            {contested.length > 0 &&
+              (overriddenBy ? (
+                <ConflictBadge chunks={contested} overriddenBy={overriddenBy} />
+              ) : (
+                <span
+                  className="chip flex-shrink-0 border-success/25 bg-success/10 text-success"
+                  title={`This mod wins pakchunk ${contested.join(", ")} because it sits higher in the load order`}
+                >
+                  Applied
+                </span>
+              ))}
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
@@ -146,6 +192,7 @@ function ModCardBase({
             <span className="font-mono">
               {mod.pakFiles.length} file{mod.pakFiles.length === 1 ? "" : "s"}
             </span>
+            {mod.sizeBytes > 0 && <span className="font-mono">{formatBytes(mod.sizeBytes)}</span>}
           </div>
         </button>
 

@@ -22,6 +22,7 @@ interface RawMod {
   loadOrder: number;
   installedAt: string;
   sourceUrl: string | null;
+  sizeBytes: number;
 }
 
 function parseMod(raw: RawMod): Mod {
@@ -42,6 +43,7 @@ function parseMod(raw: RawMod): Mod {
     loadOrder: raw.loadOrder,
     installedAt: raw.installedAt,
     sourceUrl: raw.sourceUrl ?? undefined,
+    sizeBytes: raw.sizeBytes ?? 0,
   };
 }
 

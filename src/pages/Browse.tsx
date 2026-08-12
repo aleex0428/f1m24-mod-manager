@@ -51,6 +51,14 @@ export function Browse() {
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inFlightRef = useRef(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Ctrl+F, dispatched globally by the app shell.
+  useEffect(() => {
+    const focus = () => searchRef.current?.select();
+    window.addEventListener("app:focus-search", focus);
+    return () => window.removeEventListener("app:focus-search", focus);
+  }, []);
 
   const installedUrls = useMemo(() => {
     const set = new Set<string>();
@@ -230,6 +238,7 @@ export function Browse() {
             />
           </svg>
           <input
+            ref={searchRef}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search the Overtake.gg catalog…"

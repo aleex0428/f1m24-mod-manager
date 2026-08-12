@@ -382,6 +382,7 @@ pub fn run() {
             mod_manager::get_mods,
             mod_manager::install_mod,
             mod_manager::toggle_mod,
+            mod_manager::set_all_mods_enabled,
             mod_manager::delete_mod,
             mod_manager::detect_conflicts,
             mod_manager::apply_load_order,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { selectActiveJobCount, useModStore } from "./store/modStore";
@@ -10,6 +10,8 @@ import { Sidebar } from "./components/Sidebar";
 import { PlayButton } from "./components/PlayButton";
 import { InstallPromptModal } from "./components/InstallPromptModal";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { WindowControls } from "./components/WindowControls";
+import { WhatsNewModal } from "./components/WhatsNewModal";
 import { SessionWarningModal } from "./components/SessionWarningModal";
 import { VariantPickerModal } from "./components/VariantPickerModal";
 import { extractUrlFromDeepLink } from "./lib/deepLink";
@@ -26,6 +28,7 @@ function AppShell() {
   const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
   const [isAuthWarningOpen, setIsAuthWarningOpen] = useState(false);
 
+  const navigate = useNavigate();
   const activeJobCount = useModStore(selectActiveJobCount);
   const gamePathValid = useModStore((s) => s.gamePathValid);
   const { conflicts, loadMods } = useMods();
@@ -129,6 +132,29 @@ function AppShell() {
     };
   }, [loadMods]);
 
+  // ─── Keyboard shortcuts ─────────────────────────────────
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.shiftKey) return;
+
+      const shortcuts: Record<string, () => void> = {
+        f: () => window.dispatchEvent(new CustomEvent("app:focus-search")),
+        "1": () => navigate("/library"),
+        "2": () => navigate("/browse"),
+        "3": () => navigate("/settings"),
+      };
+
+      const action = shortcuts[e.key];
+      if (action) {
+        e.preventDefault();
+        action();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate]);
+
   const handleConfirmDeepLink = useCallback(async (url: string) => {
     if (!/^https?:\/\//i.test(url)) {
       toast.error("That link does not point to an Overtake.gg mod page");
@@ -154,8 +180,11 @@ function AppShell() {
       <Sidebar />
 
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
-        <header className="titlebar flex flex-shrink-0 items-center justify-between border-b border-border/70 bg-bg-secondary/60 px-5 py-3">
-          <div className="flex items-center gap-3">
+        <header
+          data-tauri-drag-region
+          className="titlebar flex flex-shrink-0 items-center justify-between border-b border-border/70 bg-bg-secondary/60 py-2 pl-5 pr-0"
+        >
+          <div data-tauri-drag-region className="flex items-center gap-3">
             <span className="font-display text-sm font-bold tracking-wide text-text-primary">
               F1 MANAGER 24
             </span>
@@ -163,7 +192,7 @@ function AppShell() {
             <span className="text-sm text-text-muted">Mod Manager</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="no-drag flex items-center gap-2 pr-0">
             <NotificationCenter />
 
             <button
@@ -190,6 +219,8 @@ function AppShell() {
             <span className="mx-1 h-5 w-px bg-border" />
 
             <PlayButton conflicts={conflicts} />
+
+            <WindowControls />
           </div>
         </header>
 
@@ -232,6 +263,8 @@ function AppShell() {
       <SessionWarningModal isOpen={isAuthWarningOpen} onClose={() => setIsAuthWarningOpen(false)} />
 
       <VariantPickerModal />
+
+      <WhatsNewModal />
     </div>
   );
 }

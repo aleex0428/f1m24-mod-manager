@@ -1,12 +1,15 @@
 interface ConflictBadgeProps {
   /** Pakchunks this mod is fighting over, used for the tooltip. */
   chunks?: number[];
+  /** Name of the mod that wins those pakchunks, when this one loses. */
+  overriddenBy?: string;
 }
 
-export function ConflictBadge({ chunks = [] }: ConflictBadgeProps) {
-  const title = chunks.length
-    ? `Shares pakchunk ${chunks.join(", ")} with another active mod`
-    : "This mod conflicts with another active mod";
+export function ConflictBadge({ chunks = [], overriddenBy }: ConflictBadgeProps) {
+  const where = chunks.length ? ` on pakchunk ${chunks.join(", ")}` : "";
+  const title = overriddenBy
+    ? `"${overriddenBy}" sits higher in the load order and wins${where}, so this mod has no effect`
+    : `Shares pakchunk ${chunks.join(", ")} with another active mod`;
 
   return (
     <span className="chip border-warning/25 bg-warning/10 text-warning" title={title}>
@@ -17,7 +20,7 @@ export function ConflictBadge({ chunks = [] }: ConflictBadgeProps) {
           clipRule="evenodd"
         />
       </svg>
-      Conflict
+      {overriddenBy ? `Overridden by ${overriddenBy}` : "Conflict"}
     </span>
   );
 }
