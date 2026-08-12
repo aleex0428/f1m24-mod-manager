@@ -4,7 +4,7 @@ How the app is put together, and the invariants that are easy to break by
 accident. Most of the rules below exist because breaking them produced a real
 bug that was hard to diagnose — the reasoning is kept so it is not repeated.
 
-## Architecture
+## Stack
 - **Framework:** Tauri v2
 - **Backend:** Rust (`src-tauri/src/`)
 - **Frontend:** React + TypeScript + Vite (`src/`)
@@ -37,6 +37,12 @@ Invariants:
 - Backend → UI events use `downloader::emit_ui` (`emit_to("main", …)`), never a
   broadcast `emit`, so the ghost/scraper webviews are not woken up.
 - Progress events are only emitted when the byte count actually changed.
+- **Drive the ghost webview with `navigate()`, never by eval'ing
+  `window.location`.** It sits on `about:blank` until something loads a page in
+  it, and script injected into `about:blank` is silently dropped — the transfer
+  never starts and the job hangs on "connecting" until the watchdog fires.
+  Anyone whose session was restored from a cookie, rather than by signing in
+  that session, hit this on every download.
 
 Event contract: `download-started` → `download-progress` → `download-status`
 (`connecting` | `verifying` | `installing`) → `download-finished` | `download-error`.
@@ -86,6 +92,27 @@ Downloaded archives: `%TEMP%\f1m24-mod-manager\<jobId>\` while installing, then
 a copy in `<app_data>\archives\` when "Keep downloaded archives" is on. Only the
 `.pak` (+ `.ucas`/`.utoc`/`.sig`) files ever reach the game folder.
 
+## Data files
+`%APPDATA%\gg.overtake.f1m24-mod-manager\`:
+
+```
+mods.json           installed library + settings. Small, rewritten on every
+                    toggle, install and preference change.
+catalog.json        the scraped Overtake listing, ~190 KB. Written only on sync.
+archives\           a copy of each installed archive, while the setting is on.
+.window-state.json  window geometry (see Window chrome).
+```
+
+`db.rs` presents both files as one in-memory `AppDatabase`, so callers never
+care which file a field lives in. `save()` writes the library, `save_catalog()`
+the catalogue: a sync must not call `save()` and a toggle must not call
+`save_catalog()`, or the split buys nothing.
+
+A pre-1.0.1 database keeps the catalogue inside `mods.json`; it is migrated on
+first start and the original is kept as `mods.json.bak`. An unreadable
+`mods.json` is renamed to `mods.corrupt.json` rather than quietly replaced —
+losing a library is worse than refusing to start clean.
+
 ## Mod files on disk
 `~mods` naming, all handled in `mod_manager.rs`:
 ```
@@ -123,6 +150,30 @@ pakchunk99-WindowsNoEditor_300_P.pak.disabled  disabled
 - `base_of()` / `strip_priority_suffix()` are covered by unit tests — run
   `cargo test --lib` after touching them.
 
+## Frontend ↔ backend contract
+Three traps, each of which shipped a bug:
+
+- **`rename_all` on an enum renames the variants, not the fields inside them.**
+  `InstallOutcome` carries `#[serde(rename_all = "camelCase")]` on every variant
+  as well. Without it the payload says `staging_id` while the UI reads
+  `outcome.stagingId`, and the variant picker cannot complete. A test asserts
+  the exact JSON the UI consumes.
+- **`getCurrentWindow()` and `getCurrentWebview()` throw *synchronously*** when
+  the app is not running inside Tauri, so a `.catch()` on the promise they
+  would have returned never fires. Called straight from an effect, that throw
+  unmounts the whole tree and leaves a blank window — it happened twice before
+  being centralised. Always resolve them through `tauriHandle()` in
+  `src/lib/tauri.ts`.
+- **`mod-installed` has exactly one owner**: `install_mod`, on success. A second
+  emitter double-reloads the library; no emitter means an install path where the
+  list never updates. `resolve_install_variant` finishes through `install_mod`,
+  so it is covered.
+
+Command arguments are camelCase in JS and snake_case in Rust; Tauri converts
+between them. After a batch of changes it is worth re-checking every `invoke`
+against its command signature and every listened event against its emitter —
+both mismatches fail only at runtime, and only on the path that uses them.
+
 ## Window chrome
 The system frame is off (`decorations: false`); the app draws its own controls
 in the header, and dragging comes from `data-tauri-drag-region`.
@@ -142,6 +193,17 @@ window is closed to the tray — would start the app with no window at all.
 - No remote fonts/stylesheets: the CSP is `default-src 'self'`, so external
   links only cost failed requests.
 
+## Tests
+`cargo test --lib` covers what is easy to get subtly wrong and impossible to
+eyeball: filename parsing, variant detection, the database migration, update
+comparison, and the JSON shape the UI consumes.
+
+Read the variant tests before touching detection. The first implementation
+looked for files with identical names, passed the test written alongside it,
+and detected nothing at all on a real archive — because real archives give each
+alternative a different name. The tests now model shapes taken from actual
+downloads, including the ones that must **not** trigger the picker.
+
 ## Releasing
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds, signs and
 opens a draft GitHub release including `latest.json`.
@@ -159,6 +221,8 @@ opens a draft GitHub release including `latest.json`.
 
 ## Commands
 - **Dev:** `npm run tauri dev`
-- **Build:** `npm run tauri build`
+- **Build:** `npm run tauri build` (needs `TAURI_SIGNING_PRIVATE_KEY`)
+- **Release from this machine:** `npm run release`, or `-- --dry-run` for the
+  checks alone
 - **Frontend check:** `npm run build` (runs `tsc` first)
 - **Backend check:** `cd src-tauri && cargo test --lib`
