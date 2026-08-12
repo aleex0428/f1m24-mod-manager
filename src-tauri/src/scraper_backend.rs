@@ -250,7 +250,8 @@ async fn run_sync(
         for m in collected {
             conn.data.mod_cache.insert(m.overtake_id.clone(), m);
         }
-        conn.save()?;
+        // Catalogue only: a sync never touches the installed library.
+        conn.save_catalog()?;
     }
 
     Ok(total_found)
