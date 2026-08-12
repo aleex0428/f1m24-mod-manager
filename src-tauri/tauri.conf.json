@@ -53,7 +53,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "createUpdaterArtifacts": true,
     "licenseFile": "../LICENSE",
     "publisher": "F1M24 Mod Manager",

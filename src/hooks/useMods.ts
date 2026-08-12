@@ -1,6 +1,5 @@
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import toast from "react-hot-toast";
 import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
@@ -141,27 +140,8 @@ export function useMods() {
     });
   }, []);
 
-  // The backend installs mods on its own thread; refresh when it says so.
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    listen("mod-installed", () => {
-      loadMods();
-    })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        // No Tauri runtime available.
-      });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [loadMods]);
+  // Note: the "mod-installed" listener lives in App, mounted once. Registering
+  // it here would fire one full library reload per mounted consumer.
 
   return {
     mods,

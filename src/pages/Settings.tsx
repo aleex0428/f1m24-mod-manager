@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import toast from "react-hot-toast";
 
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useModStore } from "../store/modStore";
 import { formatDate } from "../lib/format";
 import { linkOvertakeAccount, unlinkOvertakeAccount, verifyOvertakeSession } from "../lib/auth";
@@ -26,12 +27,14 @@ export function Settings() {
   const [detecting, setDetecting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [modsPath, setModsPath] = useState("");
+  const [releasesUrl, setReleasesUrl] = useState("");
   const [archivesPath, setArchivesPath] = useState("");
   const update = useModStore((s) => s.appUpdate);
 
   useEffect(() => {
     invoke<CatalogStats>("get_catalog_stats").then(setStats).catch(() => {});
     invoke<string>("get_archives_path").then(setArchivesPath).catch(() => {});
+    invoke<string>("get_releases_url").then(setReleasesUrl).catch(() => {});
 
     invoke<string>("get_setting", { key: PREF_CLOSE_TO_TRAY })
       .then((v) => setCloseToTray(v !== "false"))
@@ -349,8 +352,24 @@ export function Settings() {
             </div>
           )}
 
-          {update.stage === "error" && update.error && (
-            <p className="mt-3 text-xs text-danger/90">{update.error}</p>
+          {update.stage === "error" && (
+            <div className="mt-3 rounded-xl border border-danger/25 bg-danger/10 p-3">
+              <p className="text-xs text-danger">
+                Could not reach the update server. Your copy still works — download the newest
+                version manually if you think you are behind.
+              </p>
+              {update.error && (
+                <p className="mt-1 font-mono text-[10px] text-danger/70">{update.error}</p>
+              )}
+              {releasesUrl && (
+                <button
+                  onClick={() => shellOpen(releasesUrl).catch(() => {})}
+                  className="btn-ghost mt-2 !py-1.5 !text-xs border-danger/30 text-danger"
+                >
+                  Open the downloads page
+                </button>
+              )}
+            </div>
           )}
         </section>
       </div>

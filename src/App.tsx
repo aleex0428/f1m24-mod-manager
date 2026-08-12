@@ -94,6 +94,12 @@ function AppShell() {
 
     register("auth-required", () => setIsAuthWarningOpen(true));
 
+    // Mods are installed on a backend thread; this is the single place the
+    // library is refreshed when one lands.
+    register("mod-installed", () => {
+      loadMods();
+    });
+
     // The backend confirmed a real session — dismiss any sign-in prompt.
     register("auth-linked", () => {
       setIsAuthWarningOpen(false);
@@ -109,7 +115,7 @@ function AppShell() {
       disposed = true;
       unlisteners.forEach((fn) => fn());
     };
-  }, []);
+  }, [loadMods]);
 
   const handleConfirmDeepLink = useCallback(async (url: string) => {
     if (!/^https?:\/\//i.test(url)) {

@@ -3,15 +3,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import toast from "react-hot-toast";
 
+import { InstallFromUrlModal } from "../components/InstallFromUrlModal";
 import { Skeleton } from "../components/Skeleton";
 import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
 import { linkOvertakeAccount } from "../lib/auth";
 import { formatCount, formatDate } from "../lib/format";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { CatalogMod, CatalogStats, DownloadStatus } from "../types";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 280;
+/// After this long the catalogue is stale enough that update checks start
+/// lying by omission, so the user is nudged to sync.
+const STALE_CATALOG_DAYS = 14;
+
+type SortKey = "recent" | "downloads" | "name";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  recent: "Recently updated",
+  downloads: "Most downloaded",
+  name: "Name (A-Z)",
+};
 
 interface SyncProgress {
   current_page: number;
@@ -28,6 +41,8 @@ export function Browse() {
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [hasMore, setHasMore] = useState(true);
+  const [sort, setSort] = useState<SortKey>("recent");
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const pageRef = useRef(0);
 
   const isLoggedIn = useModStore((s) => s.isLoggedIn);
@@ -46,7 +61,10 @@ export function Browse() {
   }, [installedMods]);
 
   // ─── Data loading ─────────────────────────────────────────
-  const fetchPage = useCallback(async (search: string, pageNum: number, append: boolean) => {
+  // `sortKey` is a parameter rather than a dependency so the callback stays
+  // stable and can never fetch with a stale ordering.
+  const fetchPage = useCallback(
+    async (search: string, pageNum: number, append: boolean, sortKey: SortKey) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setIsLoading(true);
@@ -55,6 +73,7 @@ export function Browse() {
         query: search,
         limit: PAGE_SIZE,
         offset: pageNum * PAGE_SIZE,
+        sort: sortKey,
       });
 
       setHasMore(data.length >= PAGE_SIZE);
@@ -70,7 +89,9 @@ export function Browse() {
       setIsLoading(false);
       inFlightRef.current = false;
     }
-  }, []);
+  },
+    []
+  );
 
   const refreshStats = useCallback(() => {
     invoke<CatalogStats>("get_catalog_stats").then(setStats).catch(() => {});
@@ -85,8 +106,8 @@ export function Browse() {
   useEffect(() => {
     pageRef.current = 0;
     setHasMore(true);
-    fetchPage(query, 0, false);
-  }, [query, fetchPage]);
+    fetchPage(query, 0, false, sort);
+  }, [query, sort, fetchPage]);
 
   useEffect(() => {
     refreshStats();
@@ -101,14 +122,14 @@ export function Browse() {
       (entries) => {
         if (!entries[0].isIntersecting || !hasMore || inFlightRef.current) return;
         pageRef.current += 1;
-        fetchPage(query, pageRef.current, true);
+        fetchPage(query, pageRef.current, true, sort);
       },
       { threshold: 0.1, rootMargin: "200px" }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hasMore, query, fetchPage, mods.length]);
+  }, [hasMore, query, sort, fetchPage, mods.length]);
 
   // ─── Catalog sync ─────────────────────────────────────────
   const handleSync = useCallback(async () => {
@@ -122,7 +143,7 @@ export function Browse() {
       toast.success(`Catalog synced — ${count} mods`);
       pageRef.current = 0;
       setHasMore(true);
-      await fetchPage(query, 0, false);
+      await fetchPage(query, 0, false, sort);
       refreshStats();
     } catch (err) {
       toast.error(String(err));
@@ -131,7 +152,7 @@ export function Browse() {
       setIsSyncing(false);
       setSyncProgress(null);
     }
-  }, [fetchPage, query, refreshStats]);
+  }, [fetchPage, query, sort, refreshStats]);
 
   const handleInstall = useCallback(
     (mod: CatalogMod) => {
@@ -146,6 +167,41 @@ export function Browse() {
       }
       if (enqueueDownload({ jobId: mod.overtakeId, title: mod.title, pageUrl: mod.url })) {
         toast.success(`${mod.title} added to the queue`);
+      }
+    },
+    [gamePathValid, isLoggedIn]
+  );
+
+  const catalogAgeDays = useMemo(() => {
+    if (!stats?.lastSync) return null;
+    const synced = new Date(stats.lastSync).getTime();
+    if (Number.isNaN(synced)) return null;
+    return Math.floor((Date.now() - synced) / 86_400_000);
+  }, [stats]);
+
+  const isCatalogStale =
+    catalogAgeDays !== null && catalogAgeDays >= STALE_CATALOG_DAYS && (stats?.count ?? 0) > 0;
+
+  const handleInstallFromUrl = useCallback(
+    (pageUrl: string) => {
+      if (!gamePathValid) {
+        toast.error("Set a valid game folder in Settings before downloading");
+        return;
+      }
+      if (!isLoggedIn) {
+        toast.error("Link your Overtake.gg account to download mods");
+        linkOvertakeAccount();
+        return;
+      }
+
+      // Reuse the Overtake resource id as the job id when the link carries one,
+      // so pasting a link the catalogue already lists does not queue it twice.
+      const id = pageUrl.match(/\.(\d+)\/?$/)?.[1];
+      const slug = pageUrl.replace(/\/+$/, "").split("/").pop() ?? "";
+      const title = slug.replace(/\.\d+$/, "").replace(/[-_]+/g, " ").trim() || "Mod from Overtake.gg";
+
+      if (enqueueDownload({ jobId: id ?? `link-${pageUrl}`, title, pageUrl })) {
+        toast.success(`${title} added to the queue`);
       }
     },
     [gamePathValid, isLoggedIn]
@@ -211,6 +267,31 @@ export function Browse() {
             {isLoggedIn ? "Linked" : "Not linked"}
           </span>
 
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="input !w-auto !py-2 !pr-8 !text-xs"
+            title="Sort the catalogue"
+          >
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+              <option key={key} value={key}>
+                {SORT_LABELS[key]}
+              </option>
+            ))}
+          </select>
+
+          <button onClick={() => setUrlDialogOpen(true)} className="btn-ghost !py-2" title="Install a mod from its Overtake.gg link">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 11-5.656-5.656l1.5-1.5m4.5-4.5l1.5-1.5a4 4 0 115.656 5.656l-3 3a4 4 0 01-5.656 0"
+              />
+            </svg>
+            From URL
+          </button>
+
           <button onClick={handleSync} disabled={isSyncing} className="btn-ghost !py-2">
             <svg
               className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
@@ -230,6 +311,25 @@ export function Browse() {
         </div>
       </div>
 
+      {/* Stale catalogue: update checks quietly stop being reliable. */}
+      {isCatalogStale && !isSyncing && (
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-warning/20 bg-warning/10 px-6 py-2.5">
+          <svg className="h-4 w-4 flex-shrink-0 text-warning" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span className="flex-1 text-xs text-warning">
+            The catalogue was last synced {catalogAgeDays} days ago — new mods and updates are missing.
+          </span>
+          <button onClick={handleSync} className="btn-ghost !py-1.5 !text-xs border-warning/30 text-warning">
+            Sync now
+          </button>
+        </div>
+      )}
+
       {/* Sync progress */}
       {isSyncing && syncProgress && (
         <div className="flex-shrink-0 border-b border-border/70 bg-surface/40 px-6 py-3">
@@ -244,6 +344,12 @@ export function Browse() {
           </div>
         </div>
       )}
+
+      <InstallFromUrlModal
+        isOpen={urlDialogOpen}
+        onClose={() => setUrlDialogOpen(false)}
+        onSubmit={handleInstallFromUrl}
+      />
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -357,6 +463,21 @@ const CatalogRow = memo(function CatalogRow({ mod, installed, onInstall }: Catal
           {mod.lastUpdated && <span>updated {mod.lastUpdated}</span>}
         </div>
       </div>
+
+      <button
+        onClick={() => shellOpen(mod.url).catch(() => {})}
+        className="btn-subtle h-9 w-9 flex-shrink-0 !px-0"
+        title="Open the mod page on Overtake.gg"
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.8}
+            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+          />
+        </svg>
+      </button>
 
       <button
         onClick={() => onInstall(mod)}

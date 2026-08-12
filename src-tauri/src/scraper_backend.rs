@@ -262,6 +262,7 @@ pub fn search_mods(
     query: String,
     limit: i32,
     offset: i32,
+    sort: Option<String>,
     state: tauri::State<AppState>,
 ) -> Result<Vec<ModCache>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -281,11 +282,26 @@ pub fn search_mods(
         })
         .collect();
 
-    matches.sort_unstable_by(|a, b| {
-        b.last_updated
-            .cmp(&a.last_updated)
-            .then_with(|| b.download_count.cmp(&a.download_count))
-    });
+    // Ties are broken deterministically so paging never repeats or skips a row.
+    match sort.as_deref() {
+        Some("downloads") => matches.sort_unstable_by(|a, b| {
+            b.download_count
+                .cmp(&a.download_count)
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        }),
+        Some("name") => matches.sort_unstable_by(|a, b| {
+            a.title
+                .to_lowercase()
+                .cmp(&b.title.to_lowercase())
+                .then_with(|| a.overtake_id.cmp(&b.overtake_id))
+        }),
+        // Default: newest first, which is how the catalogue is scraped.
+        _ => matches.sort_unstable_by(|a, b| {
+            b.last_updated
+                .cmp(&a.last_updated)
+                .then_with(|| b.download_count.cmp(&a.download_count))
+        }),
+    }
 
     let skip = offset.max(0) as usize;
     let take = limit.clamp(1, 200) as usize;

@@ -55,6 +55,27 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Public releases page, derived from the configured updater endpoint so the
+/// two can never drift apart. A build whose updater points somewhere dead still
+/// hands the user a working download link.
+#[tauri::command]
+fn get_releases_url(app: tauri::AppHandle) -> String {
+    const FALLBACK: &str = "https://github.com/aleex0428/f1m24-mod-manager/releases";
+
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("endpoints"))
+        .and_then(|endpoints| endpoints.as_array())
+        .and_then(|list| list.first())
+        .and_then(|first| first.as_str())
+        .and_then(|endpoint| endpoint.split("/download/latest.json").next())
+        .filter(|base| base.starts_with("https://"))
+        .unwrap_or(FALLBACK)
+        .to_string()
+}
+
 /// Fully exit the app (the window close button only hides to the tray).
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -343,6 +364,7 @@ pub fn run() {
             get_setting,
             save_setting,
             get_app_version,
+            get_releases_url,
             quit_app,
             // Auth
             auth::get_auth_status,

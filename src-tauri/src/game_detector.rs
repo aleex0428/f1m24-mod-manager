@@ -93,8 +93,7 @@ pub async fn select_game_path_dialog(
 
     if found_root.is_none() {
         return Err(format!(
-            "Carpeta inválida: Asegúrate de seleccionar la carpeta raíz del juego que contiene {}",
-            GAME_EXE
+            "That folder is not an F1 Manager 24 installation. Pick the root folder, the one that contains {GAME_EXE}."
         ));
     }
     

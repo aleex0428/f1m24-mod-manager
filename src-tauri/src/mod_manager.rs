@@ -25,6 +25,8 @@ use crate::{db::ModRecord, game_detector::get_mods_dir, AppState};
 
 /// Extensions that belong to a mod package.
 const MOD_EXTS: [&str; 4] = ["pak", "ucas", "utoc", "sig"];
+/// Extensions that mean "this archive ships a program", not a mod.
+const APP_EXTS: [&str; 3] = ["exe", "msi", "dll"];
 const DISABLED_SUFFIX: &str = ".disabled";
 
 // ─── Data types ──────────────────────────────────────────────────
@@ -113,6 +115,7 @@ pub async fn install_mod(
     // Collect { base → files } for everything we are about to install.
     let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
     let mut temp_extract_dir: Option<PathBuf> = None;
+    let mut looks_like_app = false;
 
     if is_already_pak {
         let name = source_path.file_name().unwrap().to_string_lossy().to_string();
@@ -151,6 +154,10 @@ pub async fn install_mod(
             };
             if let Some(base) = base_of(name) {
                 groups.entry(base).or_default().push(path.to_path_buf());
+            } else if APP_EXTS.iter().any(|ext| has_ext(path, ext)) {
+                // Remember it: a download that turns out to be an installer
+                // deserves a better answer than "no mods found".
+                looks_like_app = true;
             }
         }
     }
@@ -159,7 +166,12 @@ pub async fn install_mod(
         if let Some(dir) = &temp_extract_dir {
             let _ = fs::remove_dir_all(dir);
         }
-        return Err("No installable mod files (.pak) were found inside this archive.".to_string());
+        return Err(if looks_like_app {
+            "This download is an application, not a game mod, so there is nothing to install."
+                .to_string()
+        } else {
+            "No installable mod files (.pak) were found inside this archive.".to_string()
+        });
     }
 
     // The new archive is valid — now it is safe to retire the old version.
