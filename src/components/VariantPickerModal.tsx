@@ -3,11 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import toast from "react-hot-toast";
 import { useModStore } from "../store/modStore";
 
+/** Variant id meaning "take every folder", offered as the last option. */
+const INSTALL_ALL = "*";
+
 /**
- * Some archives ship several interchangeable copies of the same mod — an
- * "Option A" / "Option B" pair, or one folder per livery. They share file
- * names, so installing them all would silently overwrite one with another.
- * The install stops here instead of picking for the user.
+ * Archives often ship alternatives as sibling folders — "COLORED VERSION" /
+ * "WHITE VERSION", one per livery. Installing all of them at once leaves the
+ * game with several mods fighting over the same thing, so the install stops
+ * here rather than guessing. Occasionally the folders are parts of one mod
+ * instead, which is why "install everything" is always on offer.
  */
 export function VariantPickerModal() {
   const pending = useModStore((s) => s.pendingVariant);
@@ -61,19 +65,22 @@ export function VariantPickerModal() {
         <div className="border-b border-border px-6 py-4">
           <h2 className="font-display text-lg font-bold text-text-primary">Choose a version</h2>
           <p className="mt-1 text-sm text-text-muted">
-            <span className="text-text-secondary">{pending.title}</span> contains several versions
-            that use the same file names, so only one can be installed.
+            <span className="text-text-secondary">{pending.title}</span> contains several folders.
+            These are usually alternative versions of the same mod — pick the one you want.
           </p>
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto p-4">
           {pending.variants.map((variant) => {
             const isSelected = selected === variant.id;
+            const isAll = variant.id === INSTALL_ALL;
             return (
               <button
                 key={variant.id}
                 onClick={() => setSelected(variant.id)}
                 className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                  isAll ? "mt-3 border-dashed" : ""
+                } ${
                   isSelected
                     ? "border-f1red/50 bg-f1red/10"
                     : "border-border bg-bg-elevated hover:border-border-strong"
@@ -90,6 +97,11 @@ export function VariantPickerModal() {
                   <span className="truncate text-sm font-medium text-text-primary">
                     {variant.label}
                   </span>
+                  {isAll && (
+                    <span className="ml-auto flex-shrink-0 text-[11px] text-text-muted">
+                      only if they are parts of one mod
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-2 flex flex-wrap gap-1.5 pl-6.5">

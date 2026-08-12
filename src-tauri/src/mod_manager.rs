@@ -28,6 +28,8 @@ const MOD_EXTS: [&str; 4] = ["pak", "ucas", "utoc", "sig"];
 /// Extensions that mean "this archive ships a program", not a mod.
 const APP_EXTS: [&str; 3] = ["exe", "msi", "dll"];
 const DISABLED_SUFFIX: &str = ".disabled";
+/// Variant id meaning "take every folder in the archive".
+pub const VARIANT_ALL: &str = "*";
 
 // ─── Data types ──────────────────────────────────────────────────
 
@@ -374,59 +376,110 @@ fn install_groups(
 
 // ─── Variant selection ───────────────────────────────────────────
 
-/// Folders inside the archive that hold interchangeable copies of the same
-/// mod. Returns fewer than two entries when there is nothing to choose.
+/// Path of `file` relative to the archive root, using forward slashes.
+fn relative_dir(extract_dir: &Path, file: &Path) -> String {
+    file.parent()
+        .and_then(|p| p.strip_prefix(extract_dir).ok())
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
+/// Leading path segments every folder shares, so labels read "COLORED VERSION"
+/// instead of "Race_Leaderboard_v1.zip/COLORED VERSION".
+fn common_prefix(dirs: &[String]) -> Vec<String> {
+    let mut prefix: Vec<String> = match dirs.first() {
+        Some(first) => first.split('/').map(str::to_string).collect(),
+        None => return Vec::new(),
+    };
+
+    for dir in dirs.iter().skip(1) {
+        let parts: Vec<&str> = dir.split('/').collect();
+        let shared = prefix
+            .iter()
+            .zip(parts.iter())
+            .take_while(|(a, b)| a.as_str() == **b)
+            .count();
+        prefix.truncate(shared);
+    }
+
+    // Never swallow a folder whole: it is the thing being chosen.
+    if dirs.iter().any(|d| d.split('/').count() == prefix.len()) {
+        prefix.pop();
+    }
+    prefix
+}
+
+/// Folders inside the archive that each hold a `.pak`.
+///
+/// Mod authors ship alternatives as sibling folders ("COLORED VERSION",
+/// "WHITE VERSION"), and the files inside usually have *different* names, so a
+/// name clash is the wrong signal — installing them all is what breaks the
+/// game. Two or more folders holding a `.pak` is the reliable one.
+///
+/// Returns an empty list when there is nothing to choose.
 fn detect_variants(
     extract_dir: &Path,
     groups: &HashMap<String, Vec<PathBuf>>,
 ) -> Vec<InstallVariant> {
-    let clashes = groups.values().any(|files| {
-        let mut seen = std::collections::HashSet::new();
-        files.iter().any(|f| {
-            let ext = f
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            // Two files with the same base *and* extension cannot coexist.
-            !seen.insert(ext)
-        })
-    });
-
-    if !clashes {
-        return Vec::new();
-    }
-
     let mut by_dir: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
+    let mut dirs_with_pak: std::collections::BTreeSet<String> = Default::default();
+    let mut every_file: Vec<String> = Vec::new();
 
     for files in groups.values() {
         for file in files {
-            let dir = file
-                .parent()
-                .and_then(|p| p.strip_prefix(extract_dir).ok())
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
+            let dir = relative_dir(extract_dir, file);
             let name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if has_ext(file, "pak") {
+                dirs_with_pak.insert(dir.clone());
+            }
+            every_file.push(name.clone());
             by_dir.entry(dir).or_default().push(name);
         }
     }
 
-    by_dir
+    if dirs_with_pak.len() < 2 {
+        return Vec::new();
+    }
+
+    let dirs: Vec<String> = dirs_with_pak.into_iter().collect();
+    let prefix = common_prefix(&dirs);
+
+    let mut variants: Vec<InstallVariant> = dirs
         .into_iter()
-        .map(|(dir, mut files)| {
+        .map(|dir| {
+            let mut files = by_dir.remove(&dir).unwrap_or_default();
             files.sort();
+
+            let label = dir
+                .split('/')
+                .skip(prefix.len())
+                .collect::<Vec<_>>()
+                .join("/");
+
             InstallVariant {
-                label: if dir.is_empty() {
+                label: if label.is_empty() {
                     "Archive root".to_string()
                 } else {
-                    dir.clone()
+                    label
                 },
                 id: dir,
                 files,
             }
         })
-        .collect()
+        .collect();
+
+    // Sibling folders are *usually* alternatives, but some archives split one
+    // mod into parts. Offering "all" means the guess is never destructive.
+    every_file.sort();
+    every_file.dedup();
+    variants.push(InstallVariant {
+        id: VARIANT_ALL.to_string(),
+        label: "Install every folder".to_string(),
+        files: every_file,
+    });
+
+    variants
 }
 
 /// Finish a parked install with the folder the user picked.
@@ -460,12 +513,7 @@ pub fn resolve_install_variant(
         if !path.is_file() {
             continue;
         }
-        let dir = path
-            .parent()
-            .and_then(|p| p.strip_prefix(&pending.staging_dir).ok())
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if dir != variant {
+        if variant != VARIANT_ALL && relative_dir(&pending.staging_dir, path) != variant {
             continue;
         }
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
@@ -915,15 +963,63 @@ mod tests {
         assert!(installed.contains(r#""modId""#), "got {installed}");
     }
 
+    fn labels(variants: &[InstallVariant]) -> Vec<&str> {
+        variants.iter().map(|v| v.label.as_str()).collect()
+    }
+
     #[test]
     fn offers_a_choice_when_folders_hold_the_same_file() {
         let (dir, groups) = staged(&["Option A/pakchunk50.pak", "Option B/pakchunk50.pak"]);
         let variants = detect_variants(&dir, &groups);
 
-        let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
-        assert_eq!(labels, vec!["Option A", "Option B"]);
+        assert_eq!(labels(&variants), vec!["Option A", "Option B", "Install every folder"]);
         assert_eq!(variants[0].files, vec!["pakchunk50.pak"]);
+        assert_eq!(variants.last().unwrap().id, VARIANT_ALL);
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn offers_a_choice_when_folders_hold_differently_named_files() {
+        // The shape mod authors actually ship: sibling folders whose .pak files
+        // have different names. Installing them all is what breaks the game, so
+        // a name clash is the wrong thing to look for.
+        let (dir, groups) = staged(&[
+            "Race_Leaderboard_v1/COLORED VERSION/UI_Leaderboard_Color_P.pak",
+            "Race_Leaderboard_v1/WHITE VERSION/UI_Leaderboard_White_P.pak",
+            "Race_Leaderboard_v1/README.TXT",
+        ]);
+        let variants = detect_variants(&dir, &groups);
+
+        // The wrapper folder every option shares is stripped from the labels.
+        assert_eq!(
+            labels(&variants),
+            vec!["COLORED VERSION", "WHITE VERSION", "Install every folder"]
+        );
+        assert!(variants[0].id.ends_with("COLORED VERSION"), "got {}", variants[0].id);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn separate_folders_can_still_be_installed_together() {
+        // Two unrelated mods in one archive look identical to two alternatives,
+        // so the guess must never be destructive: "all" is always on offer.
+        let (dir, groups) = staged(&["Cars/pakchunk50.pak", "Tracks/pakchunk60.pak"]);
+        let variants = detect_variants(&dir, &groups);
+
+        assert_eq!(labels(&variants), vec!["Cars", "Tracks", "Install every folder"]);
+        let all = variants.last().unwrap();
+        assert_eq!(all.files, vec!["pakchunk50.pak", "pakchunk60.pak"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_single_folder_mod_is_not_a_choice() {
+        // What most downloads look like: one folder, one pak.
+        let (dir, groups) = staged(&["extendedstandings_0.2/pakchunk0-extended_2_P.pak"]);
+        assert!(detect_variants(&dir, &groups).is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -942,20 +1038,13 @@ mod tests {
     }
 
     #[test]
-    fn distinct_mods_in_separate_folders_are_not_a_choice() {
-        let (dir, groups) = staged(&["Cars/pakchunk50.pak", "Tracks/pakchunk60.pak"]);
-        assert!(detect_variants(&dir, &groups).is_empty());
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
     fn a_clash_at_the_archive_root_is_labelled() {
         let (dir, groups) = staged(&["pakchunk50.pak", "Alt/pakchunk50.pak"]);
         let variants = detect_variants(&dir, &groups);
 
-        let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
-        assert!(labels.contains(&"Archive root"), "got {labels:?}");
-        assert!(labels.contains(&"Alt"), "got {labels:?}");
+        let found = labels(&variants);
+        assert!(found.contains(&"Archive root"), "got {found:?}");
+        assert!(found.contains(&"Alt"), "got {found:?}");
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -95,12 +95,19 @@ pakchunk99-WindowsNoEditor_300_P.pak.disabled  disabled
 ```
 - `.ucas` / `.utoc` / `.sig` siblings always move, rename and delete together
   with their `.pak`.
-- When two files share a base name *and* extension, the archive is shipping
-  alternatives that cannot coexist — installing both would silently overwrite
-  one with the other. The extraction is parked in `AppState.pending_installs`,
-  the UI asks which folder to use, and `resolve_install_variant` finishes it.
-  A multi-part mod (`.pak` + `.ucas` + `.utoc`) shares a base but not an
-  extension, so it must never trigger the picker; there are tests for both.
+- **Two or more folders holding a `.pak` means the archive ships alternatives**
+  ("COLORED VERSION" / "WHITE VERSION"). Detection is by folder, not by name
+  clash: real archives give each alternative a *different* file name, so they
+  do not overwrite each other — they all install and then fight over the same
+  thing in game. The first attempt looked for name clashes and detected nothing
+  on real mods. The extraction is parked in `AppState.pending_installs`, the UI
+  asks, and `resolve_install_variant` finishes it.
+- Sibling folders are sometimes parts of one mod rather than alternatives, and
+  nothing in the archive says which. The picker therefore always offers
+  "install every folder" (`VARIANT_ALL`), so the guess is never destructive.
+- A single-folder mod and a multi-part mod (`.pak` + `.ucas` + `.utoc`) must
+  never trigger the picker; there are tests for both, and for the real
+  leaderboard archive shape.
 - A parked install owns the download slot (`awaiting_input` counts as active)
   and is dropped after 10 minutes, so an unanswered question cannot wedge the
   queue.
