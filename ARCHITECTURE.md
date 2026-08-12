@@ -123,6 +123,16 @@ pakchunk99-WindowsNoEditor_300_P.pak.disabled  disabled
 - `base_of()` / `strip_priority_suffix()` are covered by unit tests — run
   `cargo test --lib` after touching them.
 
+## Window chrome
+The system frame is off (`decorations: false`); the app draws its own controls
+in the header, and dragging comes from `data-tauri-drag-region`.
+
+`tauri-plugin-window-state` is configured with `SIZE | POSITION | MAXIMIZED`
+only. Its defaults also persist `DECORATIONS` and `VISIBLE`, and both are
+traps: a `decorated: true` saved by an older build restores the system title
+bar on top of the app's own one, and `visible: false` — written every time the
+window is closed to the tray — would start the app with no window at all.
+
 ## Performance notes
 - The store is subscribed to with selectors; `useDownload` drives the queue via
   `useModStore.subscribe` so download progress never re-renders the app tree.

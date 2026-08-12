@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 use crate::downloader::{emit_ui, ActiveDownloadMap, PendingDownload};
 
@@ -99,9 +100,18 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
-            // Only the main window is worth remembering. Restoring the hidden
-            // helper webviews would pop them onto the user's screen.
+            // Geometry only, and only for the main window.
+            //
+            // The default flags also persist DECORATIONS and VISIBLE, which
+            // are not the user's to restore: a saved `decorated: true` from an
+            // older build brings the system title bar back over the app's own
+            // one, and a saved `visible: false` — written every time the window
+            // is closed to the tray — would start the app with no window at all.
+            // Restoring the hidden helper webviews would pop them onto screen.
             tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+                )
                 .with_denylist(&["overtake_ghost", "scraper"])
                 .build(),
         )
