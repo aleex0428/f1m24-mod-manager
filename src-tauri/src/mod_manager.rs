@@ -39,6 +39,44 @@ pub struct ConflictInfo {
     pub mod_names: Vec<String>, // mod names
 }
 
+/// One of several interchangeable versions of the same mod inside a single
+/// archive — the "Option A" / "Option B" folders creators often ship.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallVariant {
+    /// Path of the folder inside the archive, used as the choice token.
+    pub id: String,
+    pub label: String,
+    pub files: Vec<String>,
+}
+
+/// An extraction parked while the user picks a variant. Holding the staging
+/// directory open is what lets the install resume without downloading again.
+pub struct PendingInstall {
+    pub staging_dir: PathBuf,
+    pub mod_name: String,
+    pub source_url: Option<String>,
+    /// Set when the install came from the download queue, so the job can be
+    /// completed or failed once the choice is made.
+    pub job_id: Option<String>,
+    /// Downloaded archive, kept so it can be archived or cleaned up later.
+    pub archive_path: Option<PathBuf>,
+    pub archive_dir: Option<PathBuf>,
+}
+
+/// What `install_mod` did: finished, or stopped to ask a question.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum InstallOutcome {
+    Installed {
+        mod_id: String,
+    },
+    NeedsVariant {
+        staging_id: String,
+        variants: Vec<InstallVariant>,
+    },
+}
+
 /// A mod file on disk, decomposed into its meaningful parts.
 struct ModFile {
     path: PathBuf,
@@ -65,7 +103,7 @@ pub async fn install_mod(
     source_url: Option<String>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<InstallOutcome, String> {
     let game_path = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         conn.get_setting("game_path")
@@ -98,9 +136,7 @@ pub async fn install_mod(
             .find(|m| m.source_url.as_deref() == Some(surl.as_str()))
             .map(|m| (m.id.clone(), m.load_order))
     });
-    let replaced_mod_id = replaced.as_ref().map(|(id, _)| id.clone());
-
-    let mut mod_name = source_path
+    let mod_name = source_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Unknown Mod")
@@ -174,7 +210,66 @@ pub async fn install_mod(
         });
     }
 
-    // The new archive is valid — now it is safe to retire the old version.
+    // Several files sharing a name means the archive ships alternatives that
+    // cannot coexist: they would overwrite each other on the way in. Park the
+    // extraction and let the user pick instead of choosing arbitrarily.
+    if let Some(dir) = &temp_extract_dir {
+        let variants = detect_variants(dir, &groups);
+        if variants.len() > 1 {
+            let staging_id = Uuid::new_v4().to_string();
+            if let Ok(mut pending) = state.pending_installs.lock() {
+                pending.insert(
+                    staging_id.clone(),
+                    PendingInstall {
+                        staging_dir: dir.clone(),
+                        mod_name,
+                        source_url,
+                        job_id: None,
+                        archive_path: None,
+                        archive_dir: None,
+                    },
+                );
+            }
+            return Ok(InstallOutcome::NeedsVariant { staging_id, variants });
+        }
+    }
+
+    let mod_id = install_groups(
+        groups,
+        is_already_pak,
+        &mods_dir,
+        if is_already_pak {
+            base_of(&source_path.file_name().unwrap_or_default().to_string_lossy())
+                .unwrap_or(mod_name)
+        } else {
+            mod_name
+        },
+        source_url,
+        replaced,
+        state,
+    )?;
+
+    if let Some(dir) = &temp_extract_dir {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    Ok(InstallOutcome::Installed { mod_id })
+}
+
+/// Move a prepared set of files into `~mods` and record the mod.
+#[allow(clippy::too_many_arguments)]
+fn install_groups(
+    mut groups: HashMap<String, Vec<PathBuf>>,
+    copy_instead_of_move: bool,
+    mods_dir: &Path,
+    mod_name: String,
+    source_url: Option<String>,
+    replaced: Option<(String, i32)>,
+    state: State<AppState>,
+) -> Result<String, String> {
+    let replaced_mod_id = replaced.as_ref().map(|(id, _)| id.clone());
+
+    // The new files are valid — now it is safe to retire the old version.
     if let Some(old_id) = &replaced_mod_id {
         let _ = delete_mod(old_id.clone(), state.clone());
     }
@@ -207,7 +302,7 @@ pub async fn install_mod(
                 .to_ascii_lowercase();
             let dest = mods_dir.join(format!("{final_base}.{ext}"));
 
-            if is_already_pak {
+            if copy_instead_of_move {
                 fs::copy(&file, &dest).map_err(|e| format!("Cannot copy {ext} file: {e}"))?;
             } else if fs::rename(&file, &dest).is_err() {
                 // Different volume: fall back to copy.
@@ -216,15 +311,6 @@ pub async fn install_mod(
         }
 
         pak_files.push(format!("{final_base}.pak"));
-    }
-
-    if let Some(dir) = &temp_extract_dir {
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    if is_already_pak {
-        mod_name = base_of(&source_path.file_name().unwrap().to_string_lossy())
-            .unwrap_or(mod_name);
     }
 
     let first_pak = mods_dir.join(&pak_files[0]);
@@ -280,6 +366,180 @@ pub async fn install_mod(
     }
 
     Ok(mod_id)
+}
+
+// ─── Variant selection ───────────────────────────────────────────
+
+/// Folders inside the archive that hold interchangeable copies of the same
+/// mod. Returns fewer than two entries when there is nothing to choose.
+fn detect_variants(
+    extract_dir: &Path,
+    groups: &HashMap<String, Vec<PathBuf>>,
+) -> Vec<InstallVariant> {
+    let clashes = groups.values().any(|files| {
+        let mut seen = std::collections::HashSet::new();
+        files.iter().any(|f| {
+            let ext = f
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            // Two files with the same base *and* extension cannot coexist.
+            !seen.insert(ext)
+        })
+    });
+
+    if !clashes {
+        return Vec::new();
+    }
+
+    let mut by_dir: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    for files in groups.values() {
+        for file in files {
+            let dir = file
+                .parent()
+                .and_then(|p| p.strip_prefix(extract_dir).ok())
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+            by_dir.entry(dir).or_default().push(name);
+        }
+    }
+
+    by_dir
+        .into_iter()
+        .map(|(dir, mut files)| {
+            files.sort();
+            InstallVariant {
+                label: if dir.is_empty() {
+                    "Archive root".to_string()
+                } else {
+                    dir.clone()
+                },
+                id: dir,
+                files,
+            }
+        })
+        .collect()
+}
+
+/// Finish a parked install with the folder the user picked.
+#[tauri::command]
+pub fn resolve_install_variant(
+    staging_id: String,
+    variant: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let pending = {
+        let mut map = state
+            .pending_installs
+            .lock()
+            .map_err(|_| "Install state is locked".to_string())?;
+        map.remove(&staging_id)
+            .ok_or("That install is no longer waiting for a choice.")?
+    };
+
+    let game_path = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.get_setting("game_path").unwrap_or_default()
+    };
+    let mods_dir = get_mods_dir(&game_path);
+
+    // Re-scan rather than carrying paths around: the staging directory is the
+    // single source of truth and cannot go stale.
+    let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for entry in WalkDir::new(&pending.staging_dir).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let dir = path
+            .parent()
+            .and_then(|p| p.strip_prefix(&pending.staging_dir).ok())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if dir != variant {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if let Some(base) = base_of(name) {
+            groups.entry(base).or_default().push(path.to_path_buf());
+        }
+    }
+
+    if !groups.values().any(|files| files.iter().any(|f| has_ext(f, "pak"))) {
+        cleanup_pending(&pending);
+        return Err("That option does not contain any .pak files.".to_string());
+    }
+
+    let replaced = pending.source_url.as_ref().and_then(|surl| {
+        let conn = state.db.lock().ok()?;
+        conn.data
+            .mods
+            .values()
+            .find(|m| m.source_url.as_deref() == Some(surl.as_str()))
+            .map(|m| (m.id.clone(), m.load_order))
+    });
+
+    let result = install_groups(
+        groups,
+        false,
+        &mods_dir,
+        pending.mod_name.clone(),
+        pending.source_url.clone(),
+        replaced,
+        state,
+    );
+
+    match result {
+        Ok(mod_id) => {
+            if let Some(archive) = &pending.archive_path {
+                crate::downloader::store_archive(&app, archive);
+            }
+            cleanup_pending(&pending);
+            crate::downloader::finish_pending_job(&app, &pending, None);
+            Ok(mod_id)
+        }
+        Err(e) => {
+            cleanup_pending(&pending);
+            crate::downloader::finish_pending_job(&app, &pending, Some(e.clone()));
+            Err(e)
+        }
+    }
+}
+
+/// Drop a parked install without installing anything.
+#[tauri::command]
+pub fn cancel_pending_install(
+    staging_id: String,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let pending = {
+        let mut map = state
+            .pending_installs
+            .lock()
+            .map_err(|_| "Install state is locked".to_string())?;
+        map.remove(&staging_id)
+    };
+
+    if let Some(pending) = pending {
+        cleanup_pending(&pending);
+        crate::downloader::finish_pending_job(&app, &pending, Some("Install canceled".to_string()));
+    }
+    Ok(())
+}
+
+fn cleanup_pending(pending: &PendingInstall) {
+    let _ = fs::remove_dir_all(&pending.staging_dir);
+    if let Some(dir) = &pending.archive_dir {
+        let _ = fs::remove_dir_all(dir);
+    }
 }
 
 /// Toggle a mod on or off by adding/removing the `.disabled` marker.
@@ -601,5 +861,76 @@ mod tests {
     #[test]
     fn reads_pakchunk_numbers() {
         assert_eq!(extract_pakchunks(&["pakchunk42-WindowsNoEditor.pak".into()]), vec![42]);
+    }
+
+    // ─── Variant detection ───────────────────────────────────────
+
+    /// Build a staging folder with the given relative files, then group it the
+    /// same way an install does.
+    fn staged(files: &[&str]) -> (PathBuf, HashMap<String, Vec<PathBuf>>) {
+        let dir = std::env::temp_dir().join(format!("f1m24-variants-{}", Uuid::new_v4()));
+        for rel in files {
+            let path = dir.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"x").unwrap();
+        }
+
+        let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for entry in WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if let Some(base) = base_of(&name) {
+                groups.entry(base).or_default().push(path.to_path_buf());
+            }
+        }
+        (dir, groups)
+    }
+
+    #[test]
+    fn offers_a_choice_when_folders_hold_the_same_file() {
+        let (dir, groups) = staged(&["Option A/pakchunk50.pak", "Option B/pakchunk50.pak"]);
+        let variants = detect_variants(&dir, &groups);
+
+        let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
+        assert_eq!(labels, vec!["Option A", "Option B"]);
+        assert_eq!(variants[0].files, vec!["pakchunk50.pak"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_multi_part_mod_is_not_a_choice() {
+        // .pak + .ucas + .utoc belong together: asking the user to pick one
+        // would break the mod.
+        let (dir, groups) = staged(&[
+            "pakchunk50.pak",
+            "pakchunk50.ucas",
+            "pakchunk50.utoc",
+            "pakchunk51.pak",
+        ]);
+        assert!(detect_variants(&dir, &groups).is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn distinct_mods_in_separate_folders_are_not_a_choice() {
+        let (dir, groups) = staged(&["Cars/pakchunk50.pak", "Tracks/pakchunk60.pak"]);
+        assert!(detect_variants(&dir, &groups).is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_clash_at_the_archive_root_is_labelled() {
+        let (dir, groups) = staged(&["pakchunk50.pak", "Alt/pakchunk50.pak"]);
+        let variants = detect_variants(&dir, &groups);
+
+        let labels: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
+        assert!(labels.contains(&"Archive root"), "got {labels:?}");
+        assert!(labels.contains(&"Alt"), "got {labels:?}");
+
+        fs::remove_dir_all(&dir).ok();
     }
 }

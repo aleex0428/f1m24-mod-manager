@@ -34,6 +34,8 @@ pub struct AppState {
     pub session_active: AtomicBool,
     /// Guards against starting more than one cookie watcher.
     pub login_watcher_running: AtomicBool,
+    /// Extractions parked waiting for the user to choose a variant.
+    pub pending_installs: Mutex<std::collections::HashMap<String, crate::mod_manager::PendingInstall>>,
 }
 
 // ─── Settings commands ───────────────────────────────────────────
@@ -127,6 +129,7 @@ pub fn run() {
                 awaiting_login: AtomicBool::new(false),
                 session_active: AtomicBool::new(false),
                 login_watcher_running: AtomicBool::new(false),
+                pending_installs: Mutex::new(std::collections::HashMap::new()),
             });
 
             // Older builds stored the raw Steam registry path, which mixes
@@ -385,6 +388,8 @@ pub fn run() {
             mod_manager::apply_load_order,
             mod_manager::open_mods_folder,
             mod_manager::get_mods_dir_path,
+            mod_manager::resolve_install_variant,
+            mod_manager::cancel_pending_install,
             // Download
             downloader::start_download_job,
             downloader::cancel_download_job,

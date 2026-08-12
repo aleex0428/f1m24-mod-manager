@@ -11,6 +11,7 @@ import { PlayButton } from "./components/PlayButton";
 import { InstallPromptModal } from "./components/InstallPromptModal";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { SessionWarningModal } from "./components/SessionWarningModal";
+import { VariantPickerModal } from "./components/VariantPickerModal";
 import { extractUrlFromDeepLink } from "./lib/deepLink";
 import { enqueueDownload } from "./lib/queue";
 import { STARTUP_CHECK_DELAY_MS, checkForAppUpdate } from "./lib/update";
@@ -98,6 +99,17 @@ function AppShell() {
     // library is refreshed when one lands.
     register("mod-installed", () => {
       loadMods();
+    });
+
+    // A download turned out to hold several versions of the same mod.
+    register<{
+      jobId?: string;
+      stagingId: string;
+      title: string;
+      variants: { id: string; label: string; files: string[] }[];
+    }>("install-variant-required", (payload) => {
+      useModStore.getState().setPendingVariant(payload);
+      setIsPitWallOpen(false);
     });
 
     // The backend confirmed a real session — dismiss any sign-in prompt.
@@ -218,6 +230,8 @@ function AppShell() {
       />
 
       <SessionWarningModal isOpen={isAuthWarningOpen} onClose={() => setIsAuthWarningOpen(false)} />
+
+      <VariantPickerModal />
     </div>
   );
 }

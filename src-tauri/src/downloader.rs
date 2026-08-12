@@ -27,6 +27,8 @@ use crate::{mod_manager, AppState};
 const START_TIMEOUT_SECS: u64 = 30;
 /// Byte-monitor sampling interval.
 const MONITOR_INTERVAL_MS: u64 = 600;
+/// How long a parked install waits for the user to pick a variant.
+const VARIANT_CHOICE_TIMEOUT_SECS: u64 = 10 * 60;
 /// Hard safety cap so a monitor can never poll forever.
 const MONITOR_MAX_TICKS: u64 = 60 * 60 * 1000 / MONITOR_INTERVAL_MS; // ~1h
 
@@ -73,6 +75,17 @@ pub struct DownloadProgressPayload {
     pub percentage: u8,
     /// Bytes per second over the last sample window.
     pub speed: u64,
+}
+
+/// Sent when an archive turned out to hold several interchangeable versions
+/// and the install is waiting for the user to pick one.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantRequiredPayload {
+    pub job_id: Option<String>,
+    pub staging_id: String,
+    pub title: String,
+    pub variants: Vec<crate::mod_manager::InstallVariant>,
 }
 
 #[derive(Clone, Serialize)]
@@ -127,7 +140,7 @@ fn keep_archives(app: &AppHandle) -> bool {
 }
 
 /// Copy a freshly installed archive into the permanent archives folder.
-fn store_archive(app: &AppHandle, source: &PathBuf) {
+pub fn store_archive(app: &AppHandle, source: &PathBuf) {
     if !keep_archives(app) {
         return;
     }
@@ -697,6 +710,40 @@ pub async fn finish_ghost_download(
     let state = app.state::<AppState>();
     let result = mod_manager::install_mod(zip_path, Some(page_url.clone()), state, app.clone()).await;
 
+    // The archive holds alternatives: hand the question to the UI and keep both
+    // the extraction and the download around until an answer arrives.
+    if let Ok(mod_manager::InstallOutcome::NeedsVariant { staging_id, variants }) = &result {
+        attach_pending_download(
+            &app,
+            staging_id,
+            download_id.clone(),
+            downloaded_path.clone(),
+            temp_dir.clone(),
+        );
+
+        emit_ui(
+            &app,
+            "download-status",
+            DownloadStatusPayload {
+                id: download_id.clone(),
+                status: "awaiting_input".to_string(),
+            },
+        );
+        emit_ui(
+            &app,
+            "install-variant-required",
+            VariantRequiredPayload {
+                job_id: Some(download_id.clone()),
+                staging_id: staging_id.clone(),
+                title: filename.clone(),
+                variants: variants.clone(),
+            },
+        );
+
+        spawn_variant_timeout(app.clone(), staging_id.clone());
+        return Ok(());
+    }
+
     // Keep a copy of what worked, then drop the temp folder either way.
     if result.is_ok() {
         store_archive(&app, &downloaded_path);
@@ -735,3 +782,93 @@ pub async fn finish_ghost_download(
 
 // Keeps the type importable from lib.rs without pulling std::collections there.
 pub type ActiveDownloadMap = HashMap<PathBuf, ActiveDownload>;
+
+// ─── Parked installs ─────────────────────────────────────────────
+
+/// Give a parked extraction the download context it needs to be completed or
+/// failed later, once the user has answered.
+fn attach_pending_download(
+    app: &AppHandle,
+    staging_id: &str,
+    job_id: String,
+    archive_path: PathBuf,
+    archive_dir: PathBuf,
+) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut pending) = state.pending_installs.lock() {
+            if let Some(entry) = pending.get_mut(staging_id) {
+                entry.job_id = Some(job_id);
+                entry.archive_path = Some(archive_path);
+                entry.archive_dir = Some(archive_dir);
+            }
+        }
+    }
+}
+
+/// Close the download job behind a parked install.
+pub fn finish_pending_job(
+    app: &AppHandle,
+    pending: &crate::mod_manager::PendingInstall,
+    error: Option<String>,
+) {
+    let Some(job_id) = pending.job_id.clone() else {
+        return; // Installed from a local file: there is no queue entry.
+    };
+
+    match error {
+        None => {
+            let filename = pending
+                .archive_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| pending.mod_name.clone());
+
+            crate::notify::notify(app, "Mod installed", &format!("{filename} is ready to race."));
+            emit_ui(
+                app,
+                "download-finished",
+                DownloadFinishedPayload { id: job_id, filename },
+            );
+            emit_ui(app, "mod-installed", ());
+        }
+        Some(message) => {
+            emit_ui(
+                app,
+                "download-error",
+                DownloadErrorPayload {
+                    id: job_id,
+                    error: message,
+                    url: pending.source_url.clone(),
+                },
+            );
+        }
+    }
+}
+
+/// A question nobody answers must not hold the download slot forever.
+fn spawn_variant_timeout(app: AppHandle, staging_id: String) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(VARIANT_CHOICE_TIMEOUT_SECS)).await;
+
+        let pending = app.try_state::<AppState>().and_then(|state| {
+            state
+                .pending_installs
+                .lock()
+                .ok()
+                .and_then(|mut map| map.remove(&staging_id))
+        });
+
+        if let Some(pending) = pending {
+            let _ = std::fs::remove_dir_all(&pending.staging_dir);
+            if let Some(dir) = &pending.archive_dir {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            finish_pending_job(
+                &app,
+                &pending,
+                Some("Timed out waiting for you to choose a version.".to_string()),
+            );
+        }
+    });
+}

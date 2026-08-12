@@ -23,7 +23,8 @@ import { CompatibilityView } from "../components/CompatibilityView";
 import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
 import { useMods } from "../hooks/useMods";
-import type { UpdateAvailable } from "../types";
+import { useModStore } from "../store/modStore";
+import type { InstallOutcome, UpdateAvailable } from "../types";
 
 export function Library() {
   const {
@@ -93,7 +94,19 @@ export function Library() {
     setInstalling(true);
     const toastId = toast.loading("Installing mod…");
     try {
-      await invoke("install_mod", { zipPath: path });
+      const outcome = await invoke<InstallOutcome>("install_mod", { zipPath: path });
+
+      if (outcome.kind === "needsVariant") {
+        // The archive ships alternatives; the modal takes it from here.
+        toast.dismiss(toastId);
+        useModStore.getState().setPendingVariant({
+          stagingId: outcome.stagingId,
+          title: path.split(/[\\/]/).pop() ?? "This archive",
+          variants: outcome.variants,
+        });
+        return;
+      }
+
       await loadMods();
       toast.success("Mod installed", { id: toastId });
     } catch (err) {

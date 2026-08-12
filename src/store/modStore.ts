@@ -6,6 +6,7 @@ import type {
   DownloadJob,
   Mod,
   NotificationKind,
+  PendingVariantChoice,
 } from "../types";
 import { isActiveStatus } from "../types";
 
@@ -29,6 +30,8 @@ interface ModStore {
   isLoggedIn: boolean;
   notifications: AppNotification[];
   appUpdate: AppUpdateState;
+  /** Set while an install waits for the user to choose a version. */
+  pendingVariant: PendingVariantChoice | null;
 
   // ─── Actions ─────────────────────────────────────────────
   setMods: (mods: Mod[]) => void;
@@ -55,6 +58,7 @@ interface ModStore {
   clearNotifications: () => void;
 
   setAppUpdate: (changes: Partial<AppUpdateState>) => void;
+  setPendingVariant: (choice: PendingVariantChoice | null) => void;
 }
 
 export const useModStore = create<ModStore>((set) => ({
@@ -72,6 +76,7 @@ export const useModStore = create<ModStore>((set) => ({
   isLoggedIn: false,
   notifications: [],
   appUpdate: { stage: "idle" },
+  pendingVariant: null,
 
   setMods: (mods) =>
     set({ mods: [...mods].sort((a, b) => a.loadOrder - b.loadOrder) }),
@@ -175,6 +180,8 @@ export const useModStore = create<ModStore>((set) => ({
 
   setAppUpdate: (changes) =>
     set((state) => ({ appUpdate: { ...state.appUpdate, ...changes } })),
+
+  setPendingVariant: (pendingVariant) => set({ pendingVariant }),
 }));
 
 // ─── Derived selectors ─────────────────────────────────────

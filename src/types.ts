@@ -60,9 +60,30 @@ export type DownloadStatus =
   | "downloading"
   | "verifying"
   | "installing"
+  | "awaiting_input"
   | "completed"
   | "error"
   | "canceled";
+
+/** One of several interchangeable copies of a mod inside a single archive. */
+export interface InstallVariant {
+  id: string;
+  label: string;
+  files: string[];
+}
+
+/** An install either finished, or stopped to ask which version to use. */
+export type InstallOutcome =
+  | { kind: "installed"; modId: string }
+  | { kind: "needsVariant"; stagingId: string; variants: InstallVariant[] };
+
+export interface PendingVariantChoice {
+  stagingId: string;
+  title: string;
+  variants: InstallVariant[];
+  /** Present when the install came from the download queue. */
+  jobId?: string;
+}
 
 /** Statuses that occupy the single download slot. */
 export const ACTIVE_STATUSES: readonly DownloadStatus[] = [
@@ -71,6 +92,9 @@ export const ACTIVE_STATUSES: readonly DownloadStatus[] = [
   "downloading",
   "verifying",
   "installing",
+  // Waiting on the user still owns the slot: starting the next download would
+  // extract a second archive on top of the parked one.
+  "awaiting_input",
 ];
 
 export function isActiveStatus(status: DownloadStatus): boolean {

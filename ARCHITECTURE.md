@@ -95,6 +95,15 @@ pakchunk99-WindowsNoEditor_300_P.pak.disabled  disabled
 ```
 - `.ucas` / `.utoc` / `.sig` siblings always move, rename and delete together
   with their `.pak`.
+- When two files share a base name *and* extension, the archive is shipping
+  alternatives that cannot coexist — installing both would silently overwrite
+  one with the other. The extraction is parked in `AppState.pending_installs`,
+  the UI asks which folder to use, and `resolve_install_variant` finishes it.
+  A multi-part mod (`.pak` + `.ucas` + `.utoc`) shares a base but not an
+  extension, so it must never trigger the picker; there are tests for both.
+- A parked install owns the download slot (`awaiting_input` counts as active)
+  and is dropped after 10 minutes, so an unanswered question cannot wedge the
+  queue.
 - Higher `_NNN_P` wins, so the **top** of the load-order list gets the highest
   number and overrides everything below it.
 - `base_of()` / `strip_priority_suffix()` are covered by unit tests — run

@@ -20,3 +20,6 @@ Thumbs.db
 # and a saved copy of an overtake.gg page used to build the scraper.
 script.py
 scrape_test.html
+
+# Local preview config
+.claude/
