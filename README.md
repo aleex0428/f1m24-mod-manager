@@ -126,7 +126,7 @@ so forks and renames keep working with no config changes.
 
 ### Releasing from your own machine
 
-Needed when GitHub Actions is unavailable — for example when a run fails
+A fallback for when GitHub Actions is unavailable — for example if a run fails
 instantly with *"the job was not started because your account is locked"*.
 
 ```bash
