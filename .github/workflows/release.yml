@@ -77,6 +77,35 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
 
+      # 12b. The endpoint is compiled into the binary and cannot be corrected
+      # afterwards: a build that ships a dead URL strands every user who
+      # installs it. Verify it resolves *before* anything is published.
+      - name: Verify the updater endpoint resolves
+        shell: bash
+        run: |
+          ENDPOINT=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.endpoints[0]")
+          echo "Endpoint: $ENDPOINT"
+
+          case "$ENDPOINT" in
+            *OWNER/REPO*|"") echo "::error::The updater endpoint is still a placeholder."; exit 1 ;;
+          esac
+
+          # On the very first release there is no published release yet, so a
+          # 404 is only fatal from the second one onwards.
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L "$ENDPOINT")
+          echo "HTTP $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            echo "Endpoint is live."
+          elif [ "$(gh release list --limit 1 | wc -l)" -eq 0 ]; then
+            echo "::notice::No published release yet; the endpoint starts working with this one."
+          else
+            echo "::error::The updater endpoint returns $STATUS but releases already exist. Publishing now would ship an app that cannot update."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build, sign and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -95,3 +124,53 @@ jobs:
           prerelease: false
           # Generates and uploads latest.json, which the app polls for updates.
           includeUpdaterJson: true
+
+      # 12a. Second, independent copy of the manifest. The releases endpoint is
+      # tried first because it is always in sync; this one is the safety net for
+      # when that URL cannot be reached, and it can be edited by hand to point
+      # anywhere if the project ever moves.
+      - name: Publish the update manifest to GitHub Pages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -rf .pages && mkdir .pages
+          gh release download "${GITHUB_REF_NAME}" --pattern latest.json --dir .pages --clobber
+
+          cd .pages
+          cat > index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>F1M24 Mod Manager — update manifest</title>
+          <p>This page only exists to serve <a href="latest.json">latest.json</a>,
+          the fallback manifest the app reads when checking for updates.</p>
+          HTML
+
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.email=actions@github.com -c user.name="github-actions"               commit -q -m "Update manifest for ${GITHUB_REF_NAME}"
+          git push -q --force               "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+
+      # 12d. Overtake.gg only accepts archives, so ship a ready-made zip built
+      # from the signed installer. Doing it here removes the failure mode of
+      # zipping a stale binary from a local build folder by hand.
+      - name: Package the installer for Overtake.gg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          BUNDLE="src-tauri/target/release/bundle/nsis"
+          INSTALLER="F1M24 Mod Manager_${VERSION}_x64-setup.exe"
+
+          if [ ! -f "$BUNDLE/$INSTALLER" ]; then
+            echo "::error::Installer not found at $BUNDLE/$INSTALLER"
+            exit 1
+          fi
+
+          sed "s/__VERSION__/${VERSION}/g" .github/overtake-readme.txt > "$BUNDLE/README - IMPORTANT.txt"
+
+          cd "$BUNDLE"
+          7z a -tzip "F1M24-Mod-Manager-${VERSION}-Windows.zip" "$INSTALLER" "README - IMPORTANT.txt"
+          gh release upload "${GITHUB_REF_NAME}" "F1M24-Mod-Manager-${VERSION}-Windows.zip" --clobber

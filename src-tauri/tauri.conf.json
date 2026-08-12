@@ -43,7 +43,8 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/aleex0428/f1m24-mod-manager/releases/latest/download/latest.json"
+        "https://github.com/aleex0428/f1m24-mod-manager/releases/latest/download/latest.json",
+        "https://aleex0428.github.io/f1m24-mod-manager/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0M0E2NEJGRUZDRUFENUYKUldSZnJjN3Z2MlE2cERvb1hNTE5Jd21uQkpIS2c0bE9jL2ZtZUcvNXRqd2J5N3hVNVFuazVrc1QK",
       "windows": {

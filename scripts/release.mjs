@@ -79,6 +79,24 @@ if (!endpoint.includes(repo)) {
   );
 }
 
+// The endpoint is compiled into the binary and cannot be corrected later: a
+// build pointing at a dead URL strands everyone who installs it.
+step("Checking the updater endpoint responds");
+const response = await fetch(endpoint, { redirect: "follow" }).catch(() => null);
+
+if (response?.ok) {
+  console.log("  live");
+} else {
+  const published = execSync("gh release list --limit 1", { encoding: "utf8" }).trim();
+  if (published) {
+    fail(
+      `The updater endpoint returns ${response?.status ?? "no response"} but releases already exist`,
+      "Publishing now would ship an app that can never update itself."
+    );
+  }
+  console.log("  not live yet - expected before the first release");
+}
+
 if (DRY_RUN) {
   console.log("\n✔ All checks passed. Nothing was built (--dry-run).");
   process.exit(0);
