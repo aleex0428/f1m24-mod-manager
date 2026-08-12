@@ -5,7 +5,7 @@
 // works offline right after a catalog sync.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::AppState;
 
@@ -82,17 +82,6 @@ pub fn check_for_updates(state: State<AppState>) -> Result<Vec<UpdateAvailable>,
     Ok(updates)
 }
 
-/// Queue the new version. Installing it replaces the old files automatically
-/// because both share the same `source_url`.
-#[tauri::command]
-pub async fn update_mod(
-    mod_id: String,
-    download_url: String,
-    page_url: String,
-    app: AppHandle,
-) -> Result<String, String> {
-    crate::downloader::start_download_job(mod_id, download_url, page_url, app).await
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────
 

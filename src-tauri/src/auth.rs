@@ -304,15 +304,6 @@ pub fn open_overtake_login(app: AppHandle, state: tauri::State<AppState>) -> Res
     Ok(())
 }
 
-/// Hide the login window without signing in.
-#[tauri::command]
-pub fn cancel_overtake_login(app: AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
-    state.awaiting_login.store(false, Ordering::Relaxed);
-    if let Some(window) = ghost_window(&app) {
-        let _ = window.hide();
-    }
-    Ok(())
-}
 
 /// Log out: drop the cookies, stop any download and reset the mirrored state.
 #[tauri::command]

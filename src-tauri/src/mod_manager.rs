@@ -65,12 +65,16 @@ pub struct PendingInstall {
 }
 
 /// What `install_mod` did: finished, or stopped to ask a question.
+///
+/// `rename_all` on an enum renames the *variants*, not the fields inside them,
+/// so each variant carries its own attribute. Without it the UI reads
+/// `outcome.stagingId` and finds `staging_id`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum InstallOutcome {
-    Installed {
-        mod_id: String,
-    },
+    #[serde(rename_all = "camelCase")]
+    Installed { mod_id: String },
+    #[serde(rename_all = "camelCase")]
     NeedsVariant {
         staging_id: String,
         variants: Vec<InstallVariant>,
@@ -502,6 +506,9 @@ pub fn resolve_install_variant(
                 crate::downloader::store_archive(&app, archive);
             }
             cleanup_pending(&pending);
+            // Always: an install started from a local file has no download job
+            // to carry this event, and the library would not refresh.
+            crate::downloader::emit_ui(&app, "mod-installed", ());
             crate::downloader::finish_pending_job(&app, &pending, None);
             Ok(mod_id)
         }
@@ -887,6 +894,25 @@ mod tests {
             }
         }
         (dir, groups)
+    }
+
+    #[test]
+    fn install_outcome_reaches_the_ui_in_camel_case() {
+        let json = serde_json::to_string(&InstallOutcome::NeedsVariant {
+            staging_id: "abc".into(),
+            variants: Vec::new(),
+        })
+        .unwrap();
+
+        // The picker reads outcome.stagingId. Enum-level rename_all does not
+        // touch fields inside variants, which broke this exact call once.
+        assert!(json.contains(r#""kind":"needsVariant""#), "got {json}");
+        assert!(json.contains(r#""stagingId""#), "got {json}");
+        assert!(!json.contains("staging_id"), "got {json}");
+
+        let installed =
+            serde_json::to_string(&InstallOutcome::Installed { mod_id: "x".into() }).unwrap();
+        assert!(installed.contains(r#""modId""#), "got {installed}");
     }
 
     #[test]

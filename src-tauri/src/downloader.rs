@@ -268,6 +268,8 @@ pub async fn start_download_job(
         return Err("Unsupported download URL (only https://overtake.gg links are allowed).".into());
     }
 
+    let target = tauri::Url::parse(&download_url).map_err(|e| format!("Invalid URL: {e}"))?;
+
     let ghost_window = app
         .get_webview_window("overtake_ghost")
         .ok_or("Download engine window is not available. Restart the app.")?;
@@ -320,10 +322,12 @@ pub async fn start_download_job(
         });
     }
 
-    // Navigating the webview is what actually triggers the native download.
-    // The URL is JSON-encoded so it cannot break out of the JS string literal.
-    let encoded = serde_json::to_string(&download_url).unwrap_or_else(|_| "\"\"".to_string());
-    if let Err(e) = ghost_window.eval(&format!("window.location.href = {};", encoded)) {
+    // Navigating the webview is what triggers the native download. This must
+    // be `navigate`, not eval'ing `window.location`: the ghost webview sits on
+    // about:blank until something loads a page there, and script injected into
+    // about:blank is silently dropped — the download would never start and the
+    // job would hang on "connecting" until the watchdog fired.
+    if let Err(e) = ghost_window.navigate(target) {
         let state = app.state::<AppState>();
         take_pending(&state, Some(&job_id));
         emit_ui(
@@ -830,7 +834,6 @@ pub fn finish_pending_job(
                 "download-finished",
                 DownloadFinishedPayload { id: job_id, filename },
             );
-            emit_ui(app, "mod-installed", ());
         }
         Some(message) => {
             emit_ui(

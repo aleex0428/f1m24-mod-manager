@@ -237,11 +237,13 @@ async fn run_sync(
         let delay = { rand::thread_rng().gen_range(900..2200) };
         tokio::time::sleep(Duration::from_millis(delay)).await;
 
+        // `navigate` rather than eval, for the same reason downloads use it. The
+        // scraper flag does not need clearing: a page load builds a fresh JS
+        // context, so `window.__f1m24_scraper_active` is gone with it.
         let next_url = format!("{BASE_URL}&page={current_page}");
-        let _ = win.eval(&format!(
-            "window.__f1m24_scraper_active = false; window.location.href = {};",
-            serde_json::to_string(&next_url).unwrap_or_else(|_| "\"\"".into())
-        ));
+        if let Ok(url) = next_url.parse() {
+            let _ = win.navigate(url);
+        }
     }
 
     // One single write at the end instead of one per page.

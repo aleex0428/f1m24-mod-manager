@@ -373,7 +373,6 @@ pub fn run() {
             auth::get_auth_status,
             auth::verify_session,
             auth::open_overtake_login,
-            auth::cancel_overtake_login,
             auth::clear_session_cookie,
             // Game detection
             game_detector::detect_game_path,
@@ -397,7 +396,6 @@ pub fn run() {
             downloader::get_archives_path,
             // Updater
             mod_updater::check_for_updates,
-            mod_updater::update_mod,
             // Launcher
             launcher::launch_game,
             // Scraper
