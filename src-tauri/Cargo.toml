@@ -1,0 +1,49 @@
+[package]
+name = "f1m24-mod-manager"
+version = "1.0.0"
+description = "F1 Manager 24 Mod Manager"
+authors = ["F1M24 Mod Manager"]
+edition = "2021"
+
+[lib]
+name = "f1m24_mod_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["webview-data-url", "tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+
+# Serialization (mods.json is the whole database)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Crypto & hashing
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+walkdir = "2.5.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-window-state = "2.4.1"
+tauri-plugin-process = "2.3.1"
+
+# Windows registry
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[profile.release]
+panic = "abort"   # Strip expensive panic clean-up code
+codegen-units = 1 # Allows LLVM to perform better optimization
+lto = true        # Enables link-time-optimizations
+opt-level = "s"   # Optimizes for binary size
+strip = true      # Automatically strip symbols from the binary

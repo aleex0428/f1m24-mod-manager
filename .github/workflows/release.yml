@@ -1,0 +1,97 @@
+name: Release
+
+# Push a version tag and this builds, signs, and publishes everything the
+# in-app updater needs:
+#
+#   git tag v1.0.1 && git push origin v1.0.1
+#
+# Requires one repository secret:
+#   TAURI_SIGNING_PRIVATE_KEY — contents of the minisign private key.
+# (No password secret is needed; an undefined secret resolves to an empty
+# string, which is what the key was generated with.)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # All three files must agree, or the updater compares the wrong versions.
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          APP_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          NPM_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          if [ "$APP_VERSION" != "$TAG_VERSION" ] || [ "$NPM_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag is $TAG_VERSION but tauri.conf.json says $APP_VERSION and package.json says $NPM_VERSION."
+            echo "Bump package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json to the same version."
+            exit 1
+          fi
+
+      # The committed config carries a placeholder endpoint on purpose; the
+      # real one is whatever repository this workflow runs in.
+      - name: Point the updater at this repository
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.plugins.updater.endpoints = [
+              `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/latest/download/latest.json`
+            ];
+            fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+            console.log("Updater endpoint:", config.plugins.updater.endpoints[0]);
+          '
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and build the frontend
+        run: npm run build
+
+      - name: Backend tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "F1M24 Mod Manager __VERSION__"
+          releaseBody: |
+            Download `F1M24 Mod Manager___VERSION___x64-setup.exe` below and run it.
+
+            Windows SmartScreen will warn that the publisher is unknown because
+            the installer is not code-signed: **More info → Run anyway**.
+          releaseDraft: true
+          prerelease: false
+          # Generates and uploads latest.json, which the app polls for updates.
+          includeUpdaterJson: true

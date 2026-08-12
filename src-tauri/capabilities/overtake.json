@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability.json",
+  "identifier": "overtake_remote",
+  "description": "The ghost webview only renders overtake.gg and is driven from Rust (navigation, download and page-load hooks). It is granted no IPC permissions on purpose: a remote page must never be able to emit app events or call commands.",
+  "windows": ["overtake_ghost", "scraper"],
+  "remote": {
+    "urls": ["https://www.overtake.gg", "https://www.overtake.gg/*"]
+  },
+  "permissions": []
+}

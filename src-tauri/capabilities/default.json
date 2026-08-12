@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability.json",
+  "identifier": "default",
+  "description": "Main window. Kept to the minimum the UI actually uses: events, the folder picker, and opening a mod page in the default browser. File access happens in Rust commands, so no fs permissions are granted to the frontend.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:app:default",
+    "core:path:default",
+    "dialog:allow-open",
+    "shell:allow-open",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

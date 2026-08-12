@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Updater signing keys — NEVER commit these.
+# The private key lives in %USERPROFILE%\.tauri\ and belongs in a CI secret.
+*.key
+*.key.pub
+
+# Local tooling / scratch
+.DS_Store
+Thumbs.db
+*.log
+
+# Development leftovers: a one-off patch script with hardcoded local paths,
+# and a saved copy of an overtake.gg page used to build the scraper.
+script.py
+scrape_test.html

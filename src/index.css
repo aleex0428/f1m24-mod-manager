@@ -1,0 +1,319 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Base ─────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #08090b;
+  color: #f2f3f5;
+  font-family: Inter, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  /* Crisper text on dark backgrounds */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Scrollbars ───────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #23262e;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3f4c;
+  background-clip: padding-box;
+}
+
+/* ─── Reusable surfaces ────────────────────────────────────── */
+@layer components {
+  /* Panel: the standard raised card. Cheap — no backdrop-filter. */
+  .panel {
+    @apply rounded-2xl border border-border bg-surface/70 shadow-card;
+  }
+
+  .panel-hover {
+    @apply transition-colors duration-200 hover:border-border-strong hover:bg-surface-raised/70;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm
+           font-medium transition-all duration-150 outline-none
+           focus-visible:ring-2 focus-visible:ring-f1red/60
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-f1red text-white font-semibold shadow-f1
+           hover:bg-f1red-light hover:shadow-f1-strong active:translate-y-px;
+  }
+
+  .btn-ghost {
+    @apply btn border border-border text-text-secondary
+           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary;
+  }
+
+  .btn-subtle {
+    @apply btn text-text-muted hover:bg-surface-raised hover:text-text-primary;
+  }
+
+  .btn-danger {
+    @apply btn border border-danger/30 text-danger hover:bg-danger/10 hover:border-danger/60;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-border bg-bg-elevated px-4 py-2.5 text-sm
+           text-text-primary placeholder-text-muted/70 outline-none transition-colors
+           focus:border-f1red/60 focus:ring-1 focus:ring-f1red/40;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5
+           text-[11px] font-semibold uppercase tracking-wider;
+  }
+
+  .section-title {
+    @apply font-display text-lg font-bold tracking-tight text-text-primary;
+  }
+}
+
+@layer utilities {
+  .text-gradient-f1 {
+    background: linear-gradient(135deg, #ff4a46 0%, #e10600 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .glow-f1 {
+    box-shadow: 0 0 20px rgba(225, 6, 0, 0.25);
+  }
+
+  .glow-f1-strong {
+    box-shadow: 0 0 40px rgba(225, 6, 0, 0.4);
+  }
+
+  /* Skips layout/paint for rows scrolled out of view — keeps long
+     catalog lists smooth without a virtualization dependency. */
+  .cv-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 72px;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* ─── App backdrop ─────────────────────────────────────────── */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 500px at 12% -10%, rgba(225, 6, 0, 0.12), transparent 60%),
+    radial-gradient(700px 420px at 100% 0%, rgba(56, 189, 248, 0.05), transparent 55%),
+    linear-gradient(180deg, #0a0b0e 0%, #08090b 55%, #07080a 100%);
+}
+
+.app-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
+}
+
+/* ─── Loading skeleton ─────────────────────────────────────── */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #14161c;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.045),
+    transparent
+  );
+  animation: sweep 1.4s linear infinite;
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+/* ─── Progress bars ────────────────────────────────────────── */
+.progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #1a1d25;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e10600, #ff5f5b);
+  transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Indeterminate: the webview never reports a total size. */
+.progress-indeterminate {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #e10600, transparent);
+  animation: sweep 1.3s ease-in-out infinite;
+}
+
+/* ─── Toggle switch ────────────────────────────────────────── */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background-color: #262a33;
+  border: 1px solid #333846;
+  transition: background-color 0.22s ease, border-color 0.22s ease;
+  border-radius: 999px;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  top: 50%;
+  translate: 0 -50%;
+  background-color: #8a90a0;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.22s ease;
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #e10600;
+  border-color: #ff2a26;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+  background-color: #ffffff;
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 3px rgba(225, 6, 0, 0.35);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── Window chrome ────────────────────────────────────────── */
+.titlebar {
+  -webkit-app-region: drag;
+}
+
+.titlebar button,
+.titlebar a,
+.titlebar input {
+  -webkit-app-region: no-drag;
+}
+
+/* ─── Misc ─────────────────────────────────────────────────── */
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-4px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.toast-custom {
+  background: #14161c !important;
+  color: #f2f3f5 !important;
+  border: 1px solid #23262e !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.65) !important;
+}
