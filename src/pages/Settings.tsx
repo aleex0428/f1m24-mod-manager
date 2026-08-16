@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import toast from "react-hot-toast";
 
@@ -41,7 +41,12 @@ export function Settings() {
   const [releasesUrl, setReleasesUrl] = useState("");
   const [archivesPath, setArchivesPath] = useState("");
   const [activeSection, setActiveSection] = useState(SECTIONS[0].id);
+  const [tailSpace, setTailSpace] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
+  /** True while a click-driven scroll is still travelling. */
+  const jumpingRef = useRef(false);
+  const jumpTimer = useRef<number>();
   const update = useModStore((s) => s.appUpdate);
 
   useEffect(() => {
@@ -68,6 +73,35 @@ export function Settings() {
     invoke<string>("get_mods_dir_path").then(setModsPath).catch(() => setModsPath(""));
   }, [gamePath]);
 
+  // Room below the last section, so every entry in the index can actually
+  // reach the top of the view.
+  //
+  // Without it the page only scrolls as far as its own overflow allows — 377px
+  // on a maximised window — while reaching "About" needs about 1100. Four of
+  // the six entries were dead: they highlighted, nothing moved, and the
+  // observer below then corrected the highlight to whichever section really
+  // was under the trigger line. That is the "I clicked Account and Catalogue
+  // lit up" bug.
+  //
+  // Measured rather than a guessed `70vh`: exactly enough, and it follows the
+  // window as it is resized.
+  useLayoutEffect(() => {
+    const root = scrollRef.current;
+    const last = document.getElementById(SECTIONS[SECTIONS.length - 1].id);
+    if (!root || !last) return;
+
+    const measure = () => {
+      // 2rem keeps the last card off the very bottom edge.
+      setTailSpace(Math.max(0, root.clientHeight - last.offsetHeight - 32));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(last);
+    return () => observer.disconnect();
+  }, []);
+
   // Highlight the section currently under the top of the viewport. The
   // rootMargin pulls the trigger line down from the very top so a section
   // becomes "current" as it settles into view, not as its last pixel leaves.
@@ -77,6 +111,12 @@ export function Settings() {
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // A smooth scroll crosses every section on the way, and each crossing
+        // fires here. Left alone, the highlight flickers through the sections
+        // in between and can settle on the wrong one — so the click owns the
+        // highlight until its scroll has arrived.
+        if (jumpingRef.current) return;
+
         const visible = entries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
@@ -90,6 +130,24 @@ export function Settings() {
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
+  }, []);
+
+  // Hand the highlight back the moment the user scrolls themselves, rather
+  // than making them wait out a timer that is no longer about anything.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const release = () => {
+      jumpingRef.current = false;
+      window.clearTimeout(jumpTimer.current);
+    };
+    root.addEventListener("wheel", release, { passive: true });
+    root.addEventListener("touchstart", release, { passive: true });
+    return () => {
+      root.removeEventListener("wheel", release);
+      root.removeEventListener("touchstart", release);
+      window.clearTimeout(jumpTimer.current);
+    };
   }, []);
 
   const savePref = useCallback(async (key: string, value: boolean) => {
@@ -161,8 +219,15 @@ export function Settings() {
   }, []);
 
   const jumpTo = useCallback((id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    jumpingRef.current = true;
     setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.clearTimeout(jumpTimer.current);
+    // Long enough for the smooth scroll to land. With reduced motion the jump
+    // is instant and this simply expires unused.
+    jumpTimer.current = window.setTimeout(() => {
+      jumpingRef.current = false;
+    }, 600);
   }, []);
 
   return (
@@ -463,6 +528,10 @@ export function Settings() {
                 </div>
               )}
             </section>
+
+            {/* The room that makes the last entries of the index reachable.
+                Height is measured, so it is never more than it has to be. */}
+            <div ref={tailRef} aria-hidden style={{ height: tailSpace }} />
           </div>
         </div>
       </div>
