@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { selectUnreadCount, useModStore } from "../store/modStore";
+import { Icon } from "./Icon";
 import type { NotificationKind } from "../types";
 
 const KIND_STYLES: Record<NotificationKind, string> = {
@@ -56,20 +57,13 @@ export function NotificationCenter() {
     <div className="relative" ref={containerRef}>
       <button
         onClick={toggle}
-        className="btn-subtle relative h-9 w-9 !px-0"
+        className="btn-icon relative"
         title="Notifications"
         aria-label="Notifications"
       >
-        <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.6}
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-          />
-        </svg>
+        <Icon name="bell" size={18} />
         {unreadCount > 0 && (
-          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-f1red px-1 font-mono text-[9px] font-bold text-white">
+          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-f1red px-1 font-mono text-2xs font-bold leading-none text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
@@ -89,17 +83,10 @@ export function NotificationCenter() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto" aria-live="polite">
             {notifications.length === 0 ? (
               <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-text-muted">
-                <svg className="h-8 w-8 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-                  />
-                </svg>
+                <Icon name="inbox" size={32} className="opacity-40" />
                 Nothing here yet
               </div>
             ) : (
@@ -114,7 +101,7 @@ export function NotificationCenter() {
                           {n.message}
                         </p>
                       )}
-                      <p className="mt-1 font-mono text-[10px] text-text-muted">{timeAgo(n.timestamp)}</p>
+                      <p className="mt-1 font-mono text-2xs text-text-muted">{timeAgo(n.timestamp)}</p>
                     </div>
                   </li>
                 ))}

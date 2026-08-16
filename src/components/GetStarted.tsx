@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 
 import { useModStore } from "../store/modStore";
 import { linkOvertakeAccount } from "../lib/auth";
+import { Icon } from "./Icon";
 import type { CatalogStats } from "../types";
 
 interface Step {
@@ -98,14 +99,7 @@ export function GetStarted() {
     <div className="mx-auto w-full max-w-xl animate-fade-in">
       <div className="mb-6 text-center">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-f1red to-f1red-dark shadow-f1">
-          <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.6}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
+          <Icon name="bolt" size={28} className="text-white" />
         </div>
         <h3 className="font-display text-xl font-bold text-text-primary">
           {remaining === 0 ? "You're all set" : "Let's get you on track"}
@@ -133,9 +127,7 @@ export function GetStarted() {
               }`}
             >
               {step.done ? (
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
+                <Icon name="check" size={16} strokeWidth={2.8} />
               ) : (
                 index + 1
               )}

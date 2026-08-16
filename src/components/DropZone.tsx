@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { installLocalFiles, isInstallable } from "../lib/install";
 import { tauriHandle } from "../lib/tauri";
 import { useModStore } from "../store/modStore";
+import { Icon } from "./Icon";
 
 /**
  * Dropping an archive on the window installs it — the gesture people try first
@@ -54,16 +55,9 @@ export function DropZone() {
   if (state === "idle") return null;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-[120] flex animate-fade-in items-center justify-center bg-bg/85 p-8">
+    <div className="pointer-events-none fixed inset-0 z-dropzone flex animate-fade-in items-center justify-center bg-bg/85 p-8">
       <div className="flex flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-f1red/60 bg-surface/80 px-16 py-14 text-center shadow-f1-strong">
-        <svg className="h-14 w-14 text-f1red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-          />
-        </svg>
+        <Icon name="download" size={56} className="text-f1red" />
         <div>
           <p className="font-display text-xl font-bold text-text-primary">Drop to install</p>
           <p className="mt-1 text-sm text-text-muted">

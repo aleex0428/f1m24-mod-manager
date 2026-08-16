@@ -43,8 +43,15 @@ const SCRAPE_JS: &str = r#"
         const url = relUrl.startsWith('http') ? relUrl : 'https://www.overtake.gg' + relUrl;
         const author = item.getAttribute('data-author') || '';
 
+        // The listing's icon is a 96x96 resource icon, and the server has no
+        // larger variant of it. A mod with no icon falls back to the author's
+        // avatar, which the listing links at XenForo's *small* size — 48px.
+        // Avatars do come in sizes (s 48 / m 96 / l 192 / o original), so ask
+        // for the large one; the frontend applies the same rewrite when
+        // reading, so an already-synced catalogue is fixed without a re-sync.
         const avatarImg = item.querySelector('.structItem-iconContainer img');
-        const image_url = avatarImg ? (avatarImg.src.startsWith('http') ? avatarImg.src : 'https://www.overtake.gg' + avatarImg.src) : '';
+        const rawSrc = avatarImg ? (avatarImg.src.startsWith('http') ? avatarImg.src : 'https://www.overtake.gg' + avatarImg.src) : '';
+        const image_url = rawSrc.replace('/avatars/s/', '/avatars/l/');
 
         const dlEl = item.querySelector('.structItem-metaItem--downloads dd');
         const download_count = dlEl ? parseInt(dlEl.textContent.replace(/,/g, '') || '0') : 0;

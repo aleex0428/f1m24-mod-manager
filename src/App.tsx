@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import toast from "react-hot-toast";
 
-import { selectActiveJobCount, useModStore } from "./store/modStore";
+import { useModStore } from "./store/modStore";
 import { PitWallDownloads } from "./components/PitWallDownloads";
 import { Sidebar } from "./components/Sidebar";
 import { PlayButton } from "./components/PlayButton";
@@ -13,6 +21,10 @@ import { NotificationCenter } from "./components/NotificationCenter";
 import { WindowControls } from "./components/WindowControls";
 import { WhatsNewModal } from "./components/WhatsNewModal";
 import { DropZone } from "./components/DropZone";
+import { HeaderDownloads } from "./components/HeaderDownloads";
+import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutsModal } from "./components/ShortcutsModal";
+import { Icon } from "./components/Icon";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { tauriHandle } from "./lib/tauri";
 import { SessionWarningModal } from "./components/SessionWarningModal";
@@ -20,23 +32,44 @@ import { VariantPickerModal } from "./components/VariantPickerModal";
 import { extractUrlFromDeepLink } from "./lib/deepLink";
 import { enqueueDownload } from "./lib/queue";
 import { STARTUP_CHECK_DELAY_MS, checkForAppUpdate } from "./lib/update";
+import { usePreference } from "./hooks/usePreference";
 import { Library } from "./pages/Library";
 import { Browse } from "./pages/Browse";
 import { Settings } from "./pages/Settings";
 import { useMods } from "./hooks/useMods";
 import { useDownload } from "./hooks/useDownload";
+import { selectActiveJobCount } from "./store/modStore";
+
+/** True when the keystroke landed in a field the user is typing into. */
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
 
 function AppShell() {
   const [isPitWallOpen, setIsPitWallOpen] = useState(false);
   const [deepLinkUrl, setDeepLinkUrl] = useState<string | null>(null);
   const [isAuthWarningOpen, setIsAuthWarningOpen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePreference("sidebar-collapsed", false);
 
   const navigate = useNavigate();
+  const location = useLocation();
   const activeJobCount = useModStore(selectActiveJobCount);
   const gamePathValid = useModStore((s) => s.gamePathValid);
   const { conflicts, loadMods } = useMods();
 
   useDownload();
+
+  const toggleSidebar = useCallback(
+    () => setSidebarCollapsed(!sidebarCollapsed),
+    [sidebarCollapsed, setSidebarCollapsed]
+  );
+
+  const openDownloads = useCallback(() => setIsPitWallOpen(true), []);
 
   // ─── One-time bootstrap ─────────────────────────────────
   useEffect(() => {
@@ -150,16 +183,37 @@ function AppShell() {
   // ─── Keyboard shortcuts ─────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.altKey || e.shiftKey) return;
+      // "?" is the one shortcut without a modifier, so it must not fire while
+      // the user is writing a search query that happens to contain one — nor
+      // stack a second dialog on top of one that is already open.
+      if (e.key === "?" && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+        e.preventDefault();
+        setIsShortcutsOpen(true);
+        return;
+      }
+
+      if (!e.ctrlKey || e.altKey) return;
+
+      // Shift is only part of Ctrl+Shift+... combos we do not use.
+      if (e.shiftKey) return;
 
       const shortcuts: Record<string, () => void> = {
+        k: () => setIsPaletteOpen((open) => !open),
         f: () => window.dispatchEvent(new CustomEvent("app:focus-search")),
+        j: () => setIsPitWallOpen((open) => !open),
+        b: toggleSidebar,
+        r: () => {
+          navigate("/browse");
+          setTimeout(() => window.dispatchEvent(new CustomEvent("app:sync-catalog")), 60);
+        },
+        ",": () => navigate("/settings"),
         "1": () => navigate("/library"),
         "2": () => navigate("/browse"),
         "3": () => navigate("/settings"),
       };
 
-      const action = shortcuts[e.key];
+      const action = shortcuts[e.key.toLowerCase()];
       if (action) {
         e.preventDefault();
         action();
@@ -168,7 +222,7 @@ function AppShell() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
+  }, [navigate, toggleSidebar]);
 
   const handleConfirmDeepLink = useCallback(async (url: string) => {
     if (!/^https?:\/\//i.test(url)) {
@@ -188,48 +242,45 @@ function AppShell() {
     }
   }, []);
 
+  const paletteHooks = useMemo(
+    () => ({ onOpenDownloads: openDownloads, onToggleSidebar: toggleSidebar, reloadMods: loadMods }),
+    [openDownloads, toggleSidebar, loadMods]
+  );
+
   return (
     <div className="relative flex h-screen overflow-hidden">
       <div className="app-backdrop" />
 
-      <Sidebar />
+      <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
 
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
         <header
           data-tauri-drag-region
-          className="titlebar flex flex-shrink-0 items-center justify-between border-b border-border/70 bg-bg-secondary/60 py-2 pl-5 pr-0"
+          className="titlebar flex flex-shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-bg-secondary/60 py-2 pl-5 pr-0"
         >
-          <div data-tauri-drag-region className="flex items-center gap-3">
+          <div data-tauri-drag-region className="flex min-w-0 items-center gap-3">
             <span className="font-display text-sm font-bold tracking-wide text-text-primary">
               F1 MANAGER 24
             </span>
             <span className="h-3.5 w-px bg-border" />
-            <span className="text-sm text-text-muted">Mod Manager</span>
+            <span className="truncate text-sm text-text-muted">Mod Manager</span>
           </div>
 
-          <div className="no-drag flex items-center gap-2 pr-0">
+          <div className="no-drag flex min-w-0 items-center gap-2 pr-0">
+            <button
+              onClick={() => setIsPaletteOpen(true)}
+              className="hidden h-9 items-center gap-2 rounded-xl border border-border bg-surface/60 px-3 text-xs text-text-muted transition-colors duration-fast hover:border-border-strong hover:bg-surface-raised hover:text-text-secondary lg:flex"
+              title="Search mods and run commands"
+            >
+              <Icon name="search" size={14} />
+              <span>Search</span>
+              <span className="kbd ml-1">Ctrl</span>
+              <span className="kbd">K</span>
+            </button>
+
             <NotificationCenter />
 
-            <button
-              onClick={() => setIsPitWallOpen(true)}
-              className="btn-subtle relative h-9 w-9 !px-0"
-              title="Downloads"
-              aria-label="Downloads"
-            >
-              <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.6}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
-              {activeJobCount > 0 && (
-                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-f1red px-1 font-mono text-[9px] font-bold text-white">
-                  {activeJobCount}
-                </span>
-              )}
-            </button>
+            <HeaderDownloads onOpen={openDownloads} />
 
             <span className="mx-1 h-5 w-px bg-border" />
 
@@ -244,18 +295,15 @@ function AppShell() {
             to="/settings"
             className="flex flex-shrink-0 items-center gap-2 border-b border-warning/20 bg-warning/10 px-5 py-2 text-xs text-warning transition-colors hover:bg-warning/15"
           >
-            <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <Icon name="warning-solid" size={16} />
             Game folder not set or invalid — mods cannot be installed. Open Settings to fix it.
           </NavLink>
         )}
 
-        <main className="flex-1 overflow-hidden">
+        {/* Keyed by path so switching tabs fades the new page in instead of
+            swapping it in place. The pages already remount on navigation, so
+            this costs nothing beyond the animation itself. */}
+        <main key={location.pathname} className="flex-1 animate-fade-in overflow-hidden">
           <Routes>
             <Route path="/" element={<Navigate to="/library" replace />} />
             <Route path="/library" element={<Library />} />
@@ -267,6 +315,14 @@ function AppShell() {
       </div>
 
       <PitWallDownloads isOpen={isPitWallOpen} onClose={() => setIsPitWallOpen(false)} />
+
+      <CommandPalette
+        isOpen={isPaletteOpen}
+        onClose={() => setIsPaletteOpen(false)}
+        hooks={paletteHooks}
+      />
+
+      <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
 
       <InstallPromptModal
         isOpen={deepLinkUrl !== null}

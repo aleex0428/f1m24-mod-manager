@@ -1,12 +1,14 @@
-import { memo, useState } from "react";
+import { memo, useState, type MouseEvent } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ConflictBadge } from "./ConflictBadge";
 import { ModDetailsModal } from "./ModDetailsModal";
+import { Icon } from "./Icon";
+import { ModCover } from "./ModCover";
 import { formatBytes, formatDate } from "../lib/format";
 import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
 
-interface ModCardProps {
+export interface ModCardProps {
   mod: Mod;
   /** How this mod fares against others claiming the same pakchunks. */
   standing?: ConflictStanding;
@@ -14,11 +16,21 @@ interface ModCardProps {
   position: number;
   isFirst: boolean;
   isLast: boolean;
+  /** Row index within the visible list, for the staggered entrance. */
+  index: number;
+  compact: boolean;
+  selected: boolean;
+  /** True while anything at all is selected, which reveals every checkbox. */
+  selectionActive: boolean;
+  /** Where the dragged row would land relative to this one. */
+  dropEdge?: "above" | "below";
+  onSelect: (id: string, event: MouseEvent) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onUpdate?: (update: UpdateAvailable) => void;
   onOpenFolder?: () => void;
   onMove?: (id: string, direction: "up" | "down") => void;
+  onContextMenu?: (event: MouseEvent, mod: Mod) => void;
 }
 
 function ModCardBase({
@@ -28,17 +40,23 @@ function ModCardBase({
   position,
   isFirst,
   isLast,
+  index,
+  compact,
+  selected,
+  selectionActive,
+  dropEdge,
+  onSelect,
   onToggle,
   onDelete,
   onUpdate,
   onOpenFolder,
   onMove,
+  onContextMenu,
 }: ModCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: mod.id,
   });
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const contested = standing?.chunks ?? [];
   const overriddenBy = standing?.overriddenBy;
@@ -48,12 +66,23 @@ function ModCardBase({
     <>
       <div
         ref={setNodeRef}
-        style={{ transform: CSS.Transform.toString(transform), transition }}
-        className={`group relative flex animate-slide-up items-stretch overflow-hidden rounded-2xl border bg-surface/60 transition-colors duration-200 ${
-          mod.enabled
-            ? "border-border hover:border-f1red/40"
-            : "border-border-subtle opacity-70 hover:opacity-100"
-        } ${isDragging ? "z-50 border-f1red/60 shadow-f1-strong" : "shadow-card"}`}
+        style={
+          {
+            transform: CSS.Transform.toString(transform),
+            transition,
+            "--i": index,
+          } as React.CSSProperties
+        }
+        onContextMenu={(e) => onContextMenu?.(e, mod)}
+        className={`stagger group relative flex items-stretch overflow-hidden rounded-2xl border bg-surface/60 transition-colors duration-base ${
+          dropEdge ? `drop-indicator drop-indicator-${dropEdge}` : ""
+        } ${
+          selected
+            ? "border-f1red/60 bg-f1red/[0.07]"
+            : mod.enabled
+              ? "border-border hover:border-f1red/40"
+              : "border-border-subtle opacity-70 hover:opacity-100"
+        } ${isDragging ? "z-50 border-f1red/60 shadow-f1-strong" : "shadow-elev-1"}`}
       >
         {/* Active accent rail */}
         <span
@@ -62,100 +91,107 @@ function ModCardBase({
           }`}
         />
 
+        {/* Selection. Hidden until it is relevant — a checkbox on every row at
+            rest turns a library into a form. */}
+        <label
+          className={`flex flex-shrink-0 cursor-pointer items-center pl-4 pr-1 transition-opacity duration-fast ${
+            selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          }`}
+          title="Select"
+          onClick={(e) => {
+            // Shift-click needs the event, which the change handler does not
+            // carry, so selection is driven from the click instead.
+            e.preventDefault();
+            onSelect(mod.id, e);
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            readOnly
+            aria-label={`Select ${mod.name}`}
+            className="h-[15px] w-[15px] cursor-pointer accent-f1red"
+          />
+        </label>
+
         {/* Drag handle */}
         <button
           {...attributes}
           {...listeners}
-          className="flex flex-shrink-0 cursor-grab items-center px-2.5 pl-4 text-text-muted transition-colors hover:text-text-secondary active:cursor-grabbing"
+          className="flex flex-shrink-0 cursor-grab items-center px-2 text-text-muted transition-colors hover:text-text-secondary active:cursor-grabbing"
           title="Drag to change load order"
-          aria-label="Reorder"
+          aria-label={`Reorder ${mod.name}`}
         >
-          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-            <circle cx="7" cy="5" r="1.5" />
-            <circle cx="13" cy="5" r="1.5" />
-            <circle cx="7" cy="10" r="1.5" />
-            <circle cx="13" cy="10" r="1.5" />
-            <circle cx="7" cy="15" r="1.5" />
-            <circle cx="13" cy="15" r="1.5" />
-          </svg>
+          <Icon name="grip" size={16} />
         </button>
 
         {/* Load order */}
         <div className="flex flex-shrink-0 items-center gap-1 pr-3">
           <span
-            className={`flex h-9 w-9 items-center justify-center rounded-lg border font-mono text-sm font-bold ${
+            className={`flex items-center justify-center rounded-lg border font-mono font-bold ${
+              compact ? "h-7 w-7 text-xs" : "h-9 w-9 text-sm"
+            } ${
               mod.enabled
                 ? "border-f1red/25 bg-f1red/10 text-f1red"
                 : "border-border bg-surface-raised text-text-muted"
             }`}
+            title={`Load order ${position} — the top of the list overrides the ones below`}
           >
             {position.toString().padStart(2, "0")}
           </span>
 
           {/* Dragging is fine for a nudge; these are for moving across a long
               list without fighting the scroll. */}
-          {onMove && (
+          {onMove && !compact && (
             <div className="flex flex-col">
               <button
                 onClick={() => onMove(mod.id, "up")}
                 disabled={isFirst}
                 className="flex h-[18px] w-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:pointer-events-none disabled:opacity-25"
                 title="Move up"
-                aria-label="Move up"
+                aria-label={`Move ${mod.name} up`}
               >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                </svg>
+                <Icon name="chevron-up" size={12} strokeWidth={2.4} />
               </button>
               <button
                 onClick={() => onMove(mod.id, "down")}
                 disabled={isLast}
                 className="flex h-[18px] w-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:pointer-events-none disabled:opacity-25"
                 title="Move down"
-                aria-label="Move down"
+                aria-label={`Move ${mod.name} down`}
               >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                </svg>
+                <Icon name="chevron-down" size={12} strokeWidth={2.4} />
               </button>
             </div>
           )}
         </div>
 
-        {/* Thumbnail */}
-        <div className="flex flex-shrink-0 items-center py-3">
-          <div className="h-16 w-16 overflow-hidden rounded-xl border border-border bg-bg-elevated">
-            {thumbnail ? (
-              <img
-                src={thumbnail}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-text-muted/50">
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.2}
-                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                  />
-                </svg>
-              </div>
-            )}
+        {/* Thumbnail. Dropped in compact mode: at 36px it is a coloured smudge
+            that costs a column of names. */}
+        {!compact && (
+          <div className="flex flex-shrink-0 items-center py-3">
+            {/* 64px box, 96px source: `fill` is a downscale here, so it stays
+                sharp and there is no need for the blurred treatment. */}
+            <ModCover
+              src={thumbnail}
+              name={mod.name}
+              mode="fill"
+              className="h-16 w-16 rounded-xl border border-border"
+            />
           </div>
-        </div>
+        )}
 
         {/* Info */}
         <button
           onClick={() => setIsDetailsOpen(true)}
-          className="flex min-w-0 flex-1 flex-col justify-center gap-1.5 px-4 py-3 text-left"
+          className={`flex min-w-0 flex-1 flex-col justify-center px-4 text-left ${
+            compact ? "gap-0 py-1.5" : "gap-1.5 py-3"
+          }`}
+          title="Open details"
         >
           <div className="flex min-w-0 items-center gap-2">
             <h3
-              className={`truncate text-[15px] font-semibold ${
+              className={`truncate font-semibold ${compact ? "text-sm" : "text-md"} ${
                 mod.enabled ? "text-text-primary" : "text-text-secondary"
               }`}
               title={mod.name}
@@ -185,10 +221,14 @@ function ModCardBase({
               ))}
           </div>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+          <div
+            className={`flex min-w-0 flex-wrap items-center gap-x-3 text-xs text-text-muted ${
+              compact ? "gap-y-0" : "gap-y-1"
+            }`}
+          >
             {mod.author && <span className="truncate">by {mod.author}</span>}
-            <span>{mod.sourceUrl ? "Overtake.gg" : "Local file"}</span>
-            {formatDate(mod.installedAt) && <span>{formatDate(mod.installedAt)}</span>}
+            {!compact && <span>{mod.sourceUrl ? "Overtake.gg" : "Local file"}</span>}
+            {!compact && formatDate(mod.installedAt) && <span>{formatDate(mod.installedAt)}</span>}
             <span className="font-mono">
               {mod.pakFiles.length} file{mod.pakFiles.length === 1 ? "" : "s"}
             </span>
@@ -197,22 +237,15 @@ function ModCardBase({
         </button>
 
         {/* Actions */}
-        <div className="flex flex-shrink-0 items-center gap-2 px-4">
+        <div className={`flex flex-shrink-0 items-center gap-2 ${compact ? "px-3" : "px-4"}`}>
           {update && onUpdate && (
             <button
               onClick={() => onUpdate(update)}
               className="btn-ghost h-9 !px-3 !text-xs border-f1red/30 text-f1red hover:bg-f1red/10 hover:text-f1red"
               title={`Update to ${update.newVersion}`}
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
-              </svg>
-              Update
+              <Icon name="upload" size={15} />
+              {!compact && "Update"}
             </button>
           )}
 
@@ -220,52 +253,33 @@ function ModCardBase({
             <input
               type="checkbox"
               checked={mod.enabled}
+              aria-label={`${mod.enabled ? "Disable" : "Enable"} ${mod.name}`}
               onChange={(e) => onToggle(mod.id, e.target.checked)}
             />
             <span className="toggle-slider" />
           </label>
 
           <div className="flex overflow-hidden rounded-lg border border-border">
-            {onOpenFolder && (
+            {onOpenFolder && !compact && (
               <button
                 onClick={onOpenFolder}
                 className="border-r border-border p-2 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary"
                 title="Open ~mods folder"
+                aria-label="Open the mods folder"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.8}
-                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                  />
-                </svg>
+                <Icon name="folder" size={16} />
               </button>
             )}
+            {/* One click, and an Undo in the toast. The old "click twice to
+                confirm" made the safe path slower without making the unsafe
+                one recoverable. */}
             <button
-              onClick={() => (confirmDelete ? onDelete(mod.id) : setConfirmDelete(true))}
-              onBlur={() => setConfirmDelete(false)}
-              className={`p-2 transition-colors ${
-                confirmDelete
-                  ? "bg-danger/15 text-danger"
-                  : "text-text-muted hover:bg-danger/10 hover:text-danger"
-              }`}
-              title={confirmDelete ? "Click again to confirm" : "Uninstall mod"}
+              onClick={() => onDelete(mod.id)}
+              className="p-2 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
+              title="Uninstall mod"
+              aria-label={`Uninstall ${mod.name}`}
             >
-              {confirmDelete ? (
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              ) : (
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.8}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-              )}
+              <Icon name="trash" size={16} />
             </button>
           </div>
         </div>

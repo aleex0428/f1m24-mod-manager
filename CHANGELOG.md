@@ -6,6 +6,39 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Added
 
+- **A command palette.** `Ctrl+K` searches your installed mods and the
+  Overtake.gg catalogue at once, and runs any action in the app — enable,
+  disable, uninstall, sync, launch the game — without hunting for the tab it
+  lives on. `?` lists every shortcut.
+- **Right-click any mod** for its actions, in the library and in the grid.
+- **The library in a grid.** Mods are pictures of cars, and the list showed
+  them at 64 pixels. Switch between list and grid, and between comfortable and
+  compact rows; the choice is remembered. Compact fits roughly twice as many
+  mods on screen.
+- **The catalogue as covers.** Browse is now a grid of posters, with the
+  description, the mod page and the install button appearing on the card you
+  are pointing at. Download progress and "already installed" are drawn on the
+  card itself. A **New to me** filter hides everything already in your library.
+- **Select several mods at a time** — tick, `Shift`-click for a range, `Ctrl+A`
+  for all of them — then enable, disable, uninstall or move them to the top of
+  the load order in one go.
+- **Filters for the library**: active, disabled, conflicting, updatable, and
+  mods installed from a local file, each with a count.
+- **A summary above the library**: how many mods are active, what they take up
+  on disk, how many conflicts are unresolved and how many updates are waiting.
+  Each figure is also the way to act on it.
+- **Undo after uninstalling.** Removing a mod no longer asks for a second
+  click; it happens, and the message offers to put it back. The files are moved
+  aside rather than deleted, and only discarded when the app next starts.
+- **Download progress in the header**, so a mod in flight can be watched
+  without opening the Pit Wall.
+- **A collapsible sidebar** (`Ctrl+B`), which gives the catalogue grid back the
+  width on a small window.
+- **A section index in Settings**, which had grown into a long scroll with no
+  map.
+- **More shortcuts**: `Ctrl+J` downloads, `Ctrl+B` sidebar, `Ctrl+R` sync,
+  `Ctrl+,` settings, `Esc` to clear a selection.
+
 - **Version picker for archives with alternatives.** Many mods ship several
   interchangeable versions in one download — "COLORED VERSION" next to
   "WHITE VERSION", or one folder per livery. The install now stops and asks
@@ -50,6 +83,23 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Improved
 
+- **One visual system instead of twenty-five.** Type sizes, spacing, elevation,
+  motion and the whole icon set are now defined once and used everywhere. The
+  same icon used to be drawn at five different weights depending on which file
+  it was pasted into; the smallest text in the app went up from 10px to 11px,
+  and the muted grey was lightened so it clears the contrast threshold on the
+  surfaces it actually sits on.
+- **Reachable by keyboard.** Dialogs announce themselves as dialogs, keep Tab
+  inside, and give focus back to whatever opened them when they close. The
+  focus ring is now visible on everything you can reach, not only on buttons.
+- **Paths, checksums and error messages can be copied again.** Text selection
+  was switched off across the whole interface, which also made every failure
+  message unquotable.
+- **Dragging a mod shows where it will land**, instead of leaving you to infer
+  it from the rows sliding apart.
+- **Rows arrive in sequence** rather than all at once, counters count rather
+  than jump, and switching tabs fades. All of it is skipped for anyone who has
+  asked their system for less motion.
 - **Toggling a mod writes 5 KB instead of 227 KB.** The scraped catalogue moved
   out of the library file into `catalog.json`, so enabling or disabling a mod no
   longer rewrites hundreds of kilobytes of unrelated data. Existing libraries
@@ -67,6 +117,22 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Fixed
 
+- **Mod pictures were blurry.** Overtake.gg's listing only publishes a 96×96
+  icon per mod — there is no larger version on the server — and the cards were
+  stretching it to roughly three times that, cropping the top and bottom off a
+  square to fit a widescreen frame. The mod's picture is now drawn at its own
+  size, sharp, over a heavily blurred copy of itself: nobody sees missing
+  resolution in something deliberately out of focus, and the card picks up the
+  mod's colours. The details panel was the worst case at a sevenfold
+  enlargement, and gets the same treatment.
+- **A handful of mods were shown at 48 pixels.** Those without an icon fall back
+  to the author's avatar, which the listing links at its smallest size. Avatars
+  do come in several sizes, so the app now asks for the 192-pixel one — four
+  times the detail. Catalogues already on disk are corrected as they are read,
+  without needing another sync.
+- **Mods with no picture at all** now get a card generated from their name —
+  initials over a colour derived from the title, the same one every time — so
+  they can be told apart instead of being eleven identical grey rectangles.
 - **Downloads could hang on "Connecting" forever.** The download was started by
   injecting a script into the hidden browser window, which silently does
   nothing until a page has been loaded there. Anyone whose session was restored

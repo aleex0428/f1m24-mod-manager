@@ -28,6 +28,14 @@ const MOD_EXTS: [&str; 4] = ["pak", "ucas", "utoc", "sig"];
 /// Extensions that mean "this archive ships a program", not a mod.
 const APP_EXTS: [&str; 3] = ["exe", "msi", "dll"];
 const DISABLED_SUFFIX: &str = ".disabled";
+/// Folder inside `~mods` holding uninstalled mods until the undo window shuts.
+/// Hidden from `read_mod_files`, which only ever looks at top-level files.
+const TRASH_ROOT: &str = ".f1m24-undo";
+/// Appended to every trashed file, so nothing in the bin still looks like a
+/// loadable `.pak` to the game.
+const TRASH_SUFFIX: &str = ".deleted";
+/// The mod's record, kept beside its files so a restore needs nothing else.
+const TRASH_MANIFEST: &str = "mod.json";
 /// Variant id meaning "take everything in the archive".
 pub const VARIANT_ALL: &str = "*";
 /// Prefix for a variant that is a folder inside the archive.
@@ -341,7 +349,9 @@ fn install_groups(
 
     // The new files are valid — now it is safe to retire the old version.
     if let Some(old_id) = &replaced_mod_id {
-        let _ = delete_mod(old_id.clone(), state.clone());
+        // Not undoable: the replacement is already on disk, so the old files
+        // are superseded rather than lost.
+        let _ = delete_mod(old_id.clone(), None, state.clone());
     }
 
     // Move every group into ~mods, renaming on collision.
@@ -804,8 +814,22 @@ pub fn toggle_mod(mod_id: String, enabled: bool, state: State<AppState>) -> Resu
 }
 
 /// Delete a mod and every file that belongs to it.
+///
+/// With `undoable`, the files are moved into [`trash_dir`] instead of being
+/// unlinked, and the record is written beside them so [`restore_mod`] can put
+/// everything back. Uninstalling is the one destructive thing this app does to
+/// a folder the user curates by hand, and "click the button twice" is a poor
+/// substitute for being able to change your mind.
+///
+/// It is deliberately *not* undoable when called internally to retire the old
+/// copy of a mod that is being updated: those files have already been replaced,
+/// so keeping them would only leave junk behind.
 #[tauri::command]
-pub fn delete_mod(mod_id: String, state: State<AppState>) -> Result<(), String> {
+pub fn delete_mod(
+    mod_id: String,
+    undoable: Option<bool>,
+    state: State<AppState>,
+) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
     let game_path = conn.get_setting("game_path").unwrap_or_default();
 
@@ -813,11 +837,31 @@ pub fn delete_mod(mod_id: String, state: State<AppState>) -> Result<(), String> 
         if !game_path.is_empty() {
             let active_dir = get_mods_dir(&game_path);
             let on_disk = read_mod_files(&active_dir);
+            let bin = undoable.unwrap_or(false).then(|| trash_dir(&active_dir, &mod_id));
+
+            if let Some(bin) = &bin {
+                fs::create_dir_all(bin).map_err(|e| format!("Cannot prepare undo: {e}"))?;
+                let manifest = serde_json::to_string(&mod_record).map_err(|e| e.to_string())?;
+                fs::write(bin.join(TRASH_MANIFEST), manifest)
+                    .map_err(|e| format!("Cannot prepare undo: {e}"))?;
+            }
 
             for pak in &mod_record.installed_filenames {
                 let Some(base) = base_of(pak) else { continue };
                 for file in on_disk.iter().filter(|f| f.base == base) {
-                    let _ = fs::remove_file(&file.path);
+                    match &bin {
+                        // Renamed on the way in, so a recursive scan by the
+                        // game can never pick a "removed" mod back up: nothing
+                        // in here ends in .pak any more. Same trick as
+                        // .disabled, for the same reason.
+                        Some(bin) => {
+                            let name = file.path.file_name().unwrap_or_default().to_string_lossy();
+                            let _ = fs::rename(&file.path, bin.join(format!("{name}{TRASH_SUFFIX}")));
+                        }
+                        None => {
+                            let _ = fs::remove_file(&file.path);
+                        }
+                    }
                 }
             }
         }
@@ -825,6 +869,61 @@ pub fn delete_mod(mod_id: String, state: State<AppState>) -> Result<(), String> 
     }
 
     Ok(())
+}
+
+/// Put a mod deleted with `undoable` back exactly where it was.
+///
+/// The load order is restored from the record, but not re-applied to the other
+/// mods: a restore is meant to look like the delete never happened, and
+/// renumbering the whole folder would be a second surprise.
+#[tauri::command]
+pub fn restore_mod(mod_id: String, state: State<AppState>) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    let game_path = conn
+        .get_setting("game_path")
+        .filter(|p| !p.trim().is_empty())
+        .ok_or("Game path is not configured")?;
+
+    let active_dir = get_mods_dir(&game_path);
+    let bin = trash_dir(&active_dir, &mod_id);
+
+    let manifest = fs::read_to_string(bin.join(TRASH_MANIFEST))
+        .map_err(|_| "That mod can no longer be restored".to_string())?;
+    let record: ModRecord =
+        serde_json::from_str(&manifest).map_err(|e| format!("Cannot read the undo record: {e}"))?;
+
+    for entry in fs::read_dir(&bin).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let Some(original) = name.strip_suffix(TRASH_SUFFIX) else {
+            continue; // the manifest itself
+        };
+        fs::rename(&path, active_dir.join(original))
+            .map_err(|e| format!("Cannot restore {original}: {e}"))?;
+    }
+
+    conn.data.mods.insert(mod_id, record);
+    conn.save()?;
+
+    let _ = fs::remove_dir_all(&bin);
+    Ok(())
+}
+
+/// Drop everything waiting in the undo bin. Called at startup, because undo is
+/// a second thought within a session — not a recycle bin that grows forever
+/// inside the game folder.
+pub fn empty_trash(game_path: &str) {
+    if game_path.trim().is_empty() {
+        return;
+    }
+    let _ = fs::remove_dir_all(get_mods_dir(game_path).join(TRASH_ROOT));
+}
+
+/// Undo storage sits *inside* `~mods` on purpose: a move within one folder is
+/// instant and cannot fail because the game is on a different drive from
+/// `%APPDATA%`, which a copy to the app data folder would.
+fn trash_dir(active_dir: &Path, mod_id: &str) -> PathBuf {
+    active_dir.join(TRASH_ROOT).join(mod_id)
 }
 
 /// Detect conflicts between enabled mods sharing the same pakchunk.
@@ -1073,6 +1172,41 @@ mod tests {
     #[test]
     fn reads_pakchunk_numbers() {
         assert_eq!(extract_pakchunks(&["pakchunk42-WindowsNoEditor.pak".into()]), vec![42]);
+    }
+
+    /// The undo bin lives inside `~mods`, so the thing that must never happen
+    /// is a "removed" mod still counting as installed — or, worse, still being
+    /// loadable. Two guards, and this asserts both: the bin is a directory so
+    /// the top-level scan skips it, and every file in it is renamed out of
+    /// `.pak` on the way in.
+    #[test]
+    fn the_undo_bin_is_invisible_to_the_mods_scan() {
+        let mods_dir = std::env::temp_dir().join(format!("f1m24-trash-{}", Uuid::new_v4()));
+        let bin = trash_dir(&mods_dir, "some-mod-id");
+        fs::create_dir_all(&bin).unwrap();
+
+        fs::write(mods_dir.join("pakchunk9-WindowsNoEditor.pak"), b"live").unwrap();
+        fs::write(
+            bin.join(format!("pakchunk8-WindowsNoEditor.pak{TRASH_SUFFIX}")),
+            b"deleted",
+        )
+        .unwrap();
+        fs::write(bin.join(TRASH_MANIFEST), b"{}").unwrap();
+
+        let found = read_mod_files(&mods_dir);
+        assert_eq!(found.len(), 1, "only the live mod is installed");
+        assert_eq!(found[0].base, "pakchunk9-WindowsNoEditor");
+
+        // And the trashed name no longer ends in a loadable extension.
+        let trashed = format!("pakchunk8-WindowsNoEditor.pak{TRASH_SUFFIX}");
+        assert!(base_of(&trashed).is_none());
+        assert_eq!(
+            trashed.strip_suffix(TRASH_SUFFIX).unwrap(),
+            "pakchunk8-WindowsNoEditor.pak",
+            "a restore has to recover the exact original name"
+        );
+
+        let _ = fs::remove_dir_all(&mods_dir);
     }
 
     // ─── Variant detection ───────────────────────────────────────

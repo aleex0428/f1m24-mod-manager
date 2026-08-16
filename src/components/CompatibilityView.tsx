@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useModStore } from "../store/modStore";
+import { Icon } from "./Icon";
 
 /**
  * Matrix of which enabled mods contest which pakchunk.
@@ -16,14 +17,7 @@ export function CompatibilityView() {
   if (conflicts.length === 0) {
     return (
       <div className="panel flex items-center gap-3 p-4">
-        <svg className="h-5 w-5 flex-shrink-0 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.6}
-            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
+        <Icon name="check-circle" size={20} className="text-success" />
         <div>
           <p className="text-sm font-medium text-success">No conflicts</p>
           <p className="text-xs text-text-muted">Every active mod owns a different pakchunk.</p>
@@ -36,14 +30,7 @@ export function CompatibilityView() {
     <section className="panel overflow-hidden">
       <header className="flex items-center justify-between border-b border-border bg-surface-raised/60 px-4 py-3">
         <h3 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-text-primary">
-          <svg className="h-4 w-4 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-            />
-          </svg>
+          <Icon name="warning" size={16} className="text-warning" />
           Compatibility matrix
         </h3>
         <span className="chip border-warning/25 bg-warning/10 text-warning">

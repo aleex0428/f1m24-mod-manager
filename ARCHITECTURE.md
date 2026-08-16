@@ -184,11 +184,90 @@ traps: a `decorated: true` saved by an older build restores the system title
 bar on top of the app's own one, and `visible: false` — written every time the
 window is closed to the tray — would start the app with no window at all.
 
+## Interface system
+Visual values are defined once, in `tailwind.config.js`, and used through their
+names: the type scale (`text-2xs` … `text-3xl`, 11px floor), `duration-fast|
+base|slow` with `ease-out-expo`, `shadow-elev-0..3`, and the `z-menu < z-drawer
+< z-modal < z-palette < z-dropzone` ladder. A component that needs a value the
+scale does not have should extend the scale, not write `text-[13px]`.
+
+- Icons come from `src/components/Icon.tsx` and nowhere else. Pasting an SVG
+  inline is how the same glyph ended up at five stroke weights across the app.
+  The exception is `WindowControls`, whose 10×10 glyphs are Windows chrome
+  metrics rather than app icons.
+- **`.stagger` uses `animation-fill-mode: backwards`, never `both`.** A
+  finished animation that keeps its final frame outranks inline styles in the
+  cascade, and library rows carry a drag transform set inline by dnd-kit —
+  with `both`, picking a row up snaps it back to `translateY(0)` and dragging
+  looks broken. `backwards` holds only the *starting* frame, during the delay.
+- Every dialog goes through `src/components/Modal.tsx`, which owns
+  `role="dialog"`, the focus trap, focus restore and Escape. `dismissable=
+  false` is for a dialog that owns state which has to be released explicitly —
+  the variant picker holds a parked extraction and the download slot with it.
+- Interface preferences (view mode, density, sidebar) live in `localStorage`
+  via `usePreference`, not in `mods.json`: they must be readable synchronously
+  on first render, and a view toggle has no business rewriting the mod
+  database.
+- Actions that belong to a page are triggered from elsewhere by dispatching a
+  window event (`app:focus-search`, `app:sync-catalog`, `app:install-file`,
+  `app:check-updates`) and handled where they live. The palette navigates and
+  dispatches; it does not carry a second copy of the implementation.
+
+## Mod pictures
+The catalogue's only image is the XenForo **resource icon: 96×96, with no
+larger variant on the server** — `/l/`, `/o/` and a `_full` suffix all 404.
+Measure before assuming otherwise; the grid was built on the assumption that
+these were cover art and enlarged them threefold.
+
+- Everything that shows a mod's picture goes through `ModCover`, which draws
+  the image at its intrinsic size over a blurred, scaled copy of itself. The
+  mechanism is `max-width`/`max-height` with **no** `width`/`height`: an image
+  with only maximums renders at its own size and shrinks to fit, but can never
+  grow. Replacing those with `w-full h-full object-cover` restores the original
+  bug exactly.
+- `mode="fill"` is only correct where the box is *smaller* than 96px — the 64px
+  row thumbnail. Anywhere else it upscales.
+- The blur is `filter`, not `backdrop-filter`. The rule against
+  `backdrop-filter` on list items still stands: it forces a read of the
+  composited backdrop. A `filter` on a 96px image is cheap, and
+  `cv-auto-tile` keeps offscreen tiles from painting at all.
+- The backdrop's base scale is a **class**, not an inline style — an inline
+  `transform` outranks the `group-hover:` utility and the card stops reacting.
+- Mods with no image get a poster generated from the name (`initialsFor`,
+  `hueFor` in `src/lib/images.ts`). Both are deterministic on purpose: a card
+  that changes colour between launches is worse than a grey one.
+- `bestImageUrl` rewrites `/avatars/s/` (48px) to `/avatars/l/` (192px) for the
+  mods that fall back to an author avatar. It runs on **read**, so a catalogue
+  already on disk is fixed without a re-sync, and the scraper applies the same
+  rewrite on write so new data is born correct. A missing variant just 404s
+  into the generated poster.
+
+## Uninstall and undo
+`delete_mod` takes an `undoable` flag. With it, the mod's files are **moved**
+into `<mods_dir>/.f1m24-undo/<modId>/` and its record is written beside them as
+`mod.json`; `restore_mod` moves them back and reinserts the record.
+
+- The bin sits inside `~mods` because a move within one folder is instant and
+  cannot fail when the game is on a different drive from `%APPDATA%` — which a
+  copy into the app data folder would.
+- Every trashed file gains a `.deleted` suffix, so nothing in the bin still
+  looks like a loadable `.pak` to the game. `read_mod_files` only scans
+  top-level files, so the folder is invisible to the app as well; there is a
+  test for both halves.
+- The bin is emptied at startup. Undo is a second thought within a session, not
+  a recycle bin that grows inside someone's game folder.
+- The internal call that retires the old copy of a mod being updated passes
+  `None`: those files are superseded, not lost.
+
 ## Performance notes
 - The store is subscribed to with selectors; `useDownload` drives the queue via
   `useModStore.subscribe` so download progress never re-renders the app tree.
-- Catalog rows subscribe to their own job status only, and use `.cv-auto`
-  (`content-visibility`) instead of a virtualization library.
+- Catalog and library tiles subscribe to their own job status only, and use
+  `.cv-auto` / `.cv-auto-tile` (`content-visibility`) instead of a
+  virtualization library.
+- `HeaderDownloads` is a component of its own precisely so the progress ticks
+  re-render that strip and nothing else. It selects **primitives** from the
+  store; a selector returning a fresh object would re-render on every write.
 - `backdrop-filter` is reserved for modals — never put it on list items.
 - No remote fonts/stylesheets: the CSP is `default-src 'self'`, so external
   links only cost failed requests.

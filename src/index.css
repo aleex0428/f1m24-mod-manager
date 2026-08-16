@@ -3,16 +3,46 @@
 @tailwind utilities;
 
 /* ─── Base ─────────────────────────────────────────────────── */
+:root {
+  /* Row geometry, swapped by the density switch in the library. The two
+     modes differ only in these values, so a card never needs to know which
+     mode it is in. */
+  --row-pad-y: 0.75rem;
+  --row-gap: 0.625rem;
+  --row-thumb: 4rem;
+  --row-min-h: 5.5rem;
+}
+
+[data-density="compact"] {
+  --row-pad-y: 0.375rem;
+  --row-gap: 0.3125rem;
+  --row-thumb: 2.25rem;
+  --row-min-h: 3rem;
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* The app chrome is not a document, so a stray drag does not select half the
+   interface. Anything the user might legitimately want to copy — paths,
+   checksums, file names, error text — opts back in, which is why the old
+   blanket `*` rule is gone: it made every failure message unquotable. */
+body {
   -webkit-user-select: none;
   user-select: none;
 }
 
 input,
-textarea {
+textarea,
+code,
+pre,
+.font-mono,
+.selectable,
+[data-selectable] {
   -webkit-user-select: text;
   user-select: text;
+  cursor: auto;
 }
 
 html,
@@ -39,7 +69,34 @@ body,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+}
+
+/* ─── Focus ────────────────────────────────────────────────
+   One visible ring for everything reachable by keyboard, not just `.btn`.
+   Keyboard-only (`:focus-visible`), so pointer users never see it. */
+:focus-visible {
+  outline: 2px solid rgba(225, 6, 0, 0.75);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(225, 6, 0, 0.75);
+  outline-offset: 2px;
+}
+
+/* Inputs draw their own focus treatment; a ring on top would double it. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
 }
 
 /* ─── Scrollbars ───────────────────────────────────────────── */
@@ -65,52 +122,110 @@ body,
 @layer components {
   /* Panel: the standard raised card. Cheap — no backdrop-filter. */
   .panel {
-    @apply rounded-2xl border border-border bg-surface/70 shadow-card;
+    @apply rounded-2xl border border-border bg-surface/70 shadow-elev-1;
   }
 
   .panel-hover {
-    @apply transition-colors duration-200 hover:border-border-strong hover:bg-surface-raised/70;
+    @apply transition-colors duration-base ease-out-expo
+           hover:border-border-strong hover:bg-surface-raised/70;
   }
 
-  /* Buttons */
+  /* Buttons — every state defined in one place: rest, hover, active, focus,
+     disabled. A variant only sets colour. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm
-           font-medium transition-all duration-150 outline-none
-           focus-visible:ring-2 focus-visible:ring-f1red/60
-           disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5
+           text-sm font-medium transition-all duration-fast ease-out-expo outline-none
+           disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45;
   }
 
   .btn-primary {
     @apply btn bg-f1red text-white font-semibold shadow-f1
-           hover:bg-f1red-light hover:shadow-f1-strong active:translate-y-px;
+           hover:bg-f1red-light hover:shadow-f1-strong active:translate-y-px active:shadow-f1;
   }
 
   .btn-ghost {
     @apply btn border border-border text-text-secondary
-           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary;
+           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary
+           active:translate-y-px;
   }
 
   .btn-subtle {
-    @apply btn text-text-muted hover:bg-surface-raised hover:text-text-primary;
+    @apply btn text-text-muted hover:bg-surface-raised hover:text-text-primary
+           active:translate-y-px;
   }
 
   .btn-danger {
-    @apply btn border border-danger/30 text-danger hover:bg-danger/10 hover:border-danger/60;
+    @apply btn border border-danger/30 text-danger
+           hover:bg-danger/10 hover:border-danger/60 active:translate-y-px;
+  }
+
+  /* Square icon button. Replaces the `h-9 w-9 !px-0` overrides that were
+     repeated in the header, the drawer and every card. */
+  .btn-icon {
+    @apply btn h-9 w-9 flex-shrink-0 rounded-xl px-0 text-text-muted
+           hover:bg-surface-raised hover:text-text-primary;
+  }
+
+  .btn-icon-sm {
+    @apply btn-icon h-7 w-7 rounded-lg;
   }
 
   .input {
     @apply w-full rounded-xl border border-border bg-bg-elevated px-4 py-2.5 text-sm
-           text-text-primary placeholder-text-muted/70 outline-none transition-colors
-           focus:border-f1red/60 focus:ring-1 focus:ring-f1red/40;
+           text-text-primary placeholder-text-muted/70 outline-none
+           transition-colors duration-fast
+           focus:border-f1red/60 focus:ring-1 focus:ring-f1red/40
+           disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5
-           text-[11px] font-semibold uppercase tracking-wider;
+           text-2xs font-semibold uppercase tracking-wider;
+  }
+
+  /* Filter pill: a chip that can be pressed. */
+  .filter-chip {
+    @apply inline-flex select-none items-center gap-1.5 rounded-full border border-border
+           bg-surface/60 px-3 py-1 text-xs font-medium text-text-secondary
+           transition-colors duration-fast
+           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary;
+  }
+
+  .filter-chip-active {
+    @apply border-f1red/[0.45] bg-f1red/[0.12] text-f1red hover:border-f1red/60
+           hover:bg-f1red/15 hover:text-f1red;
   }
 
   .section-title {
     @apply font-display text-lg font-bold tracking-tight text-text-primary;
+  }
+
+  /* Floating menu surface — context menus, dropdowns, the palette. */
+  .menu {
+    @apply min-w-[11rem] overflow-hidden rounded-xl border border-border-strong
+           bg-surface-raised p-1 shadow-elev-3;
+  }
+
+  .menu-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
+           text-text-secondary transition-colors duration-fast
+           hover:bg-surface-overlay hover:text-text-primary
+           disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .menu-item-danger {
+    @apply text-danger hover:bg-danger/10 hover:text-danger;
+  }
+
+  .menu-separator {
+    @apply my-1 h-px bg-border;
+  }
+
+  /* Keyboard hint. */
+  .kbd {
+    @apply inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-md
+           border border-border-strong bg-bg-elevated px-1.5 font-mono text-2xs
+           font-semibold text-text-muted;
   }
 }
 
@@ -137,8 +252,22 @@ body,
     contain-intrinsic-size: auto 72px;
   }
 
+  /* Same idea for the taller catalogue tiles. */
+  .cv-auto-tile {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 260px;
+  }
+
   .no-drag {
     -webkit-app-region: no-drag;
+  }
+
+  /* Clamp to two lines without a plugin. */
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 }
 
@@ -164,6 +293,40 @@ body,
   background-size: 46px 46px;
   mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
   -webkit-mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
+}
+
+/* ─── Staggered entrance ───────────────────────────────────────
+   A list that appears all at once reads as a flash; one that arrives in
+   sequence reads as an order. The delay is capped so row 40 is not still
+   waiting — past the cap everything lands together, which is invisible
+   anyway because those rows are below the fold.
+   `--i` is set inline by the list.
+
+   `backwards`, never `both`: an animation that keeps its final frame wins
+   over inline styles in the cascade, and these rows carry a drag transform
+   set inline by dnd-kit. With `both`, every row would snap back to
+   translateY(0) the moment you picked it up. `backwards` only holds the
+   *starting* frame during the delay and lets go once it has run. */
+.stagger {
+  animation: rowIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(min(var(--i, 0) * 28ms, 280ms));
+}
+
+@keyframes rowIn {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger {
+    animation-delay: 0ms !important;
+  }
 }
 
 /* ─── Loading skeleton ─────────────────────────────────────── */
@@ -202,6 +365,10 @@ body,
   border-radius: 999px;
   background: #1a1d25;
   overflow: hidden;
+}
+
+.progress-track-thin {
+  height: 3px;
 }
 
 .progress-fill {
@@ -255,8 +422,17 @@ body,
   top: 50%;
   translate: 0 -50%;
   background-color: #8a90a0;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.22s ease;
-  border-radius: 50%;
+  transition:
+    transform 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+    width 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.22s ease;
+  border-radius: 999px;
+}
+
+/* The knob stretches as it travels and settles back — the small piece of
+   physics that makes the switch feel like a switch. */
+.toggle-switch:active .toggle-slider::before {
+  width: 21px;
 }
 
 .toggle-switch input:checked + .toggle-slider {
@@ -267,6 +443,10 @@ body,
 .toggle-switch input:checked + .toggle-slider::before {
   transform: translateX(18px);
   background-color: #ffffff;
+}
+
+.toggle-switch:active input:checked + .toggle-slider::before {
+  transform: translateX(13px);
 }
 
 .toggle-switch input:focus-visible + .toggle-slider {
@@ -287,6 +467,34 @@ body,
 .titlebar a,
 .titlebar input {
   -webkit-app-region: no-drag;
+}
+
+/* ─── Drag & drop reordering ───────────────────────────────────
+   dnd-kit slides the neighbours apart but never says where the row will
+   land. Without a marker a long list is a guess: this is the line the row
+   drops onto. */
+.drop-indicator {
+  position: relative;
+}
+
+.drop-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e10600, rgba(225, 6, 0, 0.15));
+  box-shadow: 0 0 10px rgba(225, 6, 0, 0.6);
+  z-index: 20;
+}
+
+.drop-indicator-above::before {
+  top: calc(var(--row-gap) / -2 - 1px);
+}
+
+.drop-indicator-below::before {
+  bottom: calc(var(--row-gap) / -2 - 1px);
 }
 
 /* ─── Misc ─────────────────────────────────────────────────── */

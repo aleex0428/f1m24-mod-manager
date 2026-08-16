@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Modal } from "./Modal";
 
 interface InstallFromUrlModalProps {
   isOpen: boolean;
@@ -21,17 +22,6 @@ export function InstallFromUrlModal({ isOpen, onClose, onSubmit }: InstallFromUr
       setError("");
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   const submit = () => {
     const trimmed = url.trim();
@@ -60,14 +50,8 @@ export function InstallFromUrlModal({ isOpen, onClose, onSubmit }: InstallFromUr
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex animate-fade-in items-center justify-center bg-black/70 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="panel w-full max-w-lg animate-slide-up bg-surface p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal isOpen={isOpen} onClose={onClose} title="Install from a link" size="max-w-lg">
+      <div className="p-6">
         <h2 className="font-display text-lg font-bold text-text-primary">Install from a link</h2>
         <p className="mb-4 mt-1 text-sm text-text-muted">
           Paste the address of any Overtake.gg mod page. Useful when the mod is newer than your last
@@ -85,12 +69,16 @@ export function InstallFromUrlModal({ isOpen, onClose, onSubmit }: InstallFromUr
             if (e.key === "Enter") submit();
           }}
           placeholder="https://www.overtake.gg/downloads/my-mod.12345/"
+          aria-label="Overtake.gg mod page address"
+          aria-invalid={error ? true : undefined}
           className="input font-mono !text-xs"
           spellCheck={false}
         />
 
         {error ? (
-          <p className="mt-2 text-xs text-danger">{error}</p>
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {error}
+          </p>
         ) : (
           <p className="mt-2 text-xs text-text-muted">
             The mod's real name and version are filled in from the catalogue once it installs.
@@ -106,6 +94,6 @@ export function InstallFromUrlModal({ isOpen, onClose, onSubmit }: InstallFromUr
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

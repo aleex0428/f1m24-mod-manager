@@ -5,6 +5,8 @@ import toast from "react-hot-toast";
 
 import { InstallFromUrlModal } from "../components/InstallFromUrlModal";
 import { Skeleton } from "../components/Skeleton";
+import { Icon } from "../components/Icon";
+import { ModCover } from "../components/ModCover";
 import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
 import { linkOvertakeAccount } from "../lib/auth";
@@ -43,6 +45,7 @@ export function Browse() {
   const [hasMore, setHasMore] = useState(true);
   const [sort, setSort] = useState<SortKey>("recent");
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
+  const [hideInstalled, setHideInstalled] = useState(false);
   const pageRef = useRef(0);
 
   const isLoggedIn = useModStore((s) => s.isLoggedIn);
@@ -73,31 +76,31 @@ export function Browse() {
   // stable and can never fetch with a stale ordering.
   const fetchPage = useCallback(
     async (search: string, pageNum: number, append: boolean, sortKey: SortKey) => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
-    setIsLoading(true);
-    try {
-      const data = await invoke<CatalogMod[]>("search_mods", {
-        query: search,
-        limit: PAGE_SIZE,
-        offset: pageNum * PAGE_SIZE,
-        sort: sortKey,
-      });
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      setIsLoading(true);
+      try {
+        const data = await invoke<CatalogMod[]>("search_mods", {
+          query: search,
+          limit: PAGE_SIZE,
+          offset: pageNum * PAGE_SIZE,
+          sort: sortKey,
+        });
 
-      setHasMore(data.length >= PAGE_SIZE);
-      setMods((prev) => {
-        if (!append) return data;
-        // The observer can fire twice around a re-render; never duplicate rows.
-        const seen = new Set(prev.map((m) => m.overtakeId));
-        return [...prev, ...data.filter((m) => !seen.has(m.overtakeId))];
-      });
-    } catch (err) {
-      toast.error(`Could not read the local catalog: ${err}`);
-    } finally {
-      setIsLoading(false);
-      inFlightRef.current = false;
-    }
-  },
+        setHasMore(data.length >= PAGE_SIZE);
+        setMods((prev) => {
+          if (!append) return data;
+          // The observer can fire twice around a re-render; never duplicate rows.
+          const seen = new Set(prev.map((m) => m.overtakeId));
+          return [...prev, ...data.filter((m) => !seen.has(m.overtakeId))];
+        });
+      } catch (err) {
+        toast.error(`Could not read the local catalog: ${err}`);
+      } finally {
+        setIsLoading(false);
+        inFlightRef.current = false;
+      }
+    },
     []
   );
 
@@ -141,6 +144,7 @@ export function Browse() {
 
   // ─── Catalog sync ─────────────────────────────────────────
   const handleSync = useCallback(async () => {
+    if (inFlightRef.current) return;
     setIsSyncing(true);
     setSyncProgress({ current_page: 0, total_pages: 1, mods_found: 0 });
 
@@ -161,6 +165,15 @@ export function Browse() {
       setSyncProgress(null);
     }
   }, [fetchPage, query, sort, refreshStats]);
+
+  // Ctrl+R and the command palette both arrive here.
+  useEffect(() => {
+    const onSync = () => {
+      if (!isSyncing) handleSync();
+    };
+    window.addEventListener("app:sync-catalog", onSync);
+    return () => window.removeEventListener("app:sync-catalog", onSync);
+  }, [handleSync, isSyncing]);
 
   const handleInstall = useCallback(
     (mod: CatalogMod) => {
@@ -219,29 +232,27 @@ export function Browse() {
     ? Math.max(4, Math.round((syncProgress.current_page / Math.max(1, syncProgress.total_pages)) * 100))
     : 0;
 
+  const visibleMods = useMemo(
+    () => (hideInstalled ? mods.filter((m) => !installedUrls.has(normalizeUrl(m.url))) : mods),
+    [mods, hideInstalled, installedUrls]
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-border/70 px-6 py-4">
         <div className="relative min-w-[16rem] flex-1 max-w-md">
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
+          <Icon
+            name="search"
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+          />
           <input
             ref={searchRef}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search the Overtake.gg catalog…"
+            aria-label="Search the catalogue"
             className="input !py-2 !pl-9"
           />
           {searchInput && (
@@ -249,22 +260,54 @@ export function Browse() {
               onClick={() => setSearchInput("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-primary"
               title="Clear"
+              aria-label="Clear the search"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <Icon name="close" size={16} />
             </button>
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-3">
-          {stats && (
-            <span className="hidden text-xs text-text-muted sm:block">
-              {stats.count} mods cached
-              {stats.lastSync && ` · synced ${formatDate(stats.lastSync)}`}
-            </span>
-          )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setHideInstalled((v) => !v)}
+            aria-pressed={hideInstalled}
+            className={`filter-chip !py-1.5 ${hideInstalled ? "filter-chip-active" : ""}`}
+            title="Hide the mods already in your library"
+          >
+            <Icon name="filter" size={13} />
+            New to me
+          </button>
 
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="input !w-auto !py-2 !pr-8 !text-xs"
+            aria-label="Sort the catalogue"
+            title="Sort the catalogue"
+          >
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+              <option key={key} value={key}>
+                {SORT_LABELS[key]}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setUrlDialogOpen(true)}
+            className="btn-ghost !py-2"
+            title="Install a mod from its Overtake.gg link"
+          >
+            <Icon name="link" size={16} />
+            From URL
+          </button>
+
+          <button onClick={handleSync} disabled={isSyncing} className="btn-ghost !py-2" title="Ctrl+R">
+            <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
+            {isSyncing ? "Syncing…" : "Sync catalog"}
+          </button>
+        </div>
+
+        <div className="flex w-full items-center gap-3 text-xs text-text-muted">
           <span
             className={`chip ${
               isLoggedIn
@@ -275,61 +318,24 @@ export function Browse() {
             <span className={`h-1.5 w-1.5 rounded-full ${isLoggedIn ? "bg-success" : "bg-text-muted"}`} />
             {isLoggedIn ? "Linked" : "Not linked"}
           </span>
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            className="input !w-auto !py-2 !pr-8 !text-xs"
-            title="Sort the catalogue"
-          >
-            {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-              <option key={key} value={key}>
-                {SORT_LABELS[key]}
-              </option>
-            ))}
-          </select>
-
-          <button onClick={() => setUrlDialogOpen(true)} className="btn-ghost !py-2" title="Install a mod from its Overtake.gg link">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.8}
-                d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 11-5.656-5.656l1.5-1.5m4.5-4.5l1.5-1.5a4 4 0 115.656 5.656l-3 3a4 4 0 01-5.656 0"
-              />
-            </svg>
-            From URL
-          </button>
-
-          <button onClick={handleSync} disabled={isSyncing} className="btn-ghost !py-2">
-            <svg
-              className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.8}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            {isSyncing ? "Syncing…" : "Sync catalog"}
-          </button>
+          {stats && (
+            <span>
+              {stats.count} mods cached
+              {stats.lastSync && ` · synced ${formatDate(stats.lastSync)}`}
+            </span>
+          )}
+          {hideInstalled && (
+            <span className="text-text-secondary">
+              {mods.length - visibleMods.length} already installed hidden
+            </span>
+          )}
         </div>
       </div>
 
       {/* Stale catalogue: update checks quietly stop being reliable. */}
       {isCatalogStale && !isSyncing && (
         <div className="flex flex-shrink-0 items-center gap-3 border-b border-warning/20 bg-warning/10 px-6 py-2.5">
-          <svg className="h-4 w-4 flex-shrink-0 text-warning" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-              clipRule="evenodd"
-            />
-          </svg>
+          <Icon name="warning-solid" size={16} className="text-warning" />
           <span className="flex-1 text-xs text-warning">
             The catalogue was last synced {catalogAgeDays} days ago — new mods and updates are missing.
           </span>
@@ -360,23 +366,30 @@ export function Browse() {
         onSubmit={handleInstallFromUrl}
       />
 
-      {/* List */}
+      {/* Grid */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {isLoading && mods.length === 0 ? (
-          <div className="space-y-2.5">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Skeleton key={i} className="h-[76px] w-full" />
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+              <Skeleton key={i} className="h-[15rem] w-full" />
             ))}
           </div>
-        ) : mods.length === 0 ? (
-          <EmptyCatalog isSearching={query.length > 0} onSync={handleSync} isSyncing={isSyncing} />
+        ) : visibleMods.length === 0 ? (
+          <EmptyCatalog
+            isSearching={query.length > 0}
+            isFiltered={hideInstalled && mods.length > 0}
+            onSync={handleSync}
+            onShowAll={() => setHideInstalled(false)}
+            isSyncing={isSyncing}
+          />
         ) : (
           <>
-            <div className="space-y-2">
-              {mods.map((mod) => (
-                <CatalogRow
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3">
+              {visibleMods.map((mod, index) => (
+                <CatalogTile
                   key={mod.overtakeId}
                   mod={mod}
+                  index={index}
                   installed={installedUrls.has(normalizeUrl(mod.url))}
                   onInstall={handleInstall}
                 />
@@ -399,10 +412,11 @@ export function Browse() {
   );
 }
 
-// ─── Row ───────────────────────────────────────────────────
+// ─── Tile ──────────────────────────────────────────────────
 
-interface CatalogRowProps {
+interface CatalogTileProps {
   mod: CatalogMod;
+  index: number;
   installed: boolean;
   onInstall: (mod: CatalogMod) => void;
 }
@@ -418,91 +432,113 @@ const BUSY_LABEL: Partial<Record<DownloadStatus, string>> = {
   completed: "Installed",
 };
 
-const CatalogRow = memo(function CatalogRow({ mod, installed, onInstall }: CatalogRowProps) {
-  // Subscribing to this row's own status keeps progress ticks from
-  // re-rendering the entire catalog list.
+/** Statuses where the tile should show a live bar over the cover. */
+const IN_FLIGHT: DownloadStatus[] = ["initiating", "connecting", "downloading", "verifying", "installing"];
+
+/**
+ * A catalogue entry as a poster.
+ *
+ * The listing is browsed to find something worth installing, and what people
+ * actually recognise is the picture — a livery, a helmet, a HUD. The old row
+ * showed it at 56px next to three lines of metadata, which is the layout for
+ * scanning a table, not for choosing. The metadata is still all here; it just
+ * stops competing with the thing you came to look at.
+ */
+const CatalogTile = memo(function CatalogTile({ mod, index, installed, onInstall }: CatalogTileProps) {
+  // Subscribing to this tile's own status keeps progress ticks from
+  // re-rendering the entire catalog.
   const status = useModStore((s) => s.jobs[mod.overtakeId]?.status);
   const busyLabel = status ? BUSY_LABEL[status] : undefined;
   const failed = status === "error";
+  const inFlight = status ? IN_FLIGHT.includes(status) : false;
 
   return (
-    <article className="cv-auto panel panel-hover flex items-center gap-4 p-3">
-      <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl border border-border bg-bg-elevated">
-        {mod.imageUrl ? (
-          <img
-            src={mod.imageUrl}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-text-muted/40">
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.2}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
+    <article
+      style={{ "--i": index } as React.CSSProperties}
+      className="stagger cv-auto-tile group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-surface/60 shadow-elev-1 transition-colors duration-base hover:border-border-strong"
+    >
+      <div className="relative aspect-[16/9] w-full overflow-hidden bg-bg-elevated">
+        {/* No `scale` on hover: the source is a 96px icon, and magnifying it
+            further was half of why these looked so rough. The blurred backdrop
+            inside ModCover is what reacts instead. */}
+        <ModCover
+          src={mod.imageUrl ?? undefined}
+          name={mod.title}
+          reactive
+          className="absolute inset-0 h-full w-full"
+        />
+
+        {/* The description only earns space when you are looking at this one. */}
+        {mod.description && (
+          <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/90 via-black/60 to-transparent p-3 opacity-0 transition-opacity duration-base group-hover:opacity-100">
+            <p className="clamp-2 text-xs leading-snug text-white/90">{mod.description}</p>
           </div>
         )}
-      </div>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h3 className="truncate text-sm font-semibold text-text-primary" title={mod.title}>
-            {mod.title}
-          </h3>
-          {mod.version && (
-            <span className="chip flex-shrink-0 border-border bg-surface-raised text-text-secondary">
-              v{mod.version}
-            </span>
-          )}
-        </div>
-        {mod.description && (
-          <p className="mt-0.5 truncate text-xs text-text-muted" title={mod.description}>
-            {mod.description}
-          </p>
+        {installed && !busyLabel && (
+          <span className="absolute left-2.5 top-2.5 flex items-center gap-1 rounded-lg bg-success/90 px-2 py-1 text-2xs font-semibold uppercase tracking-wider text-black">
+            <Icon name="check" size={12} strokeWidth={2.5} />
+            Installed
+          </span>
         )}
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-text-muted">
-          {mod.author && <span className="truncate">by {mod.author}</span>}
-          <span className="font-mono">{formatCount(mod.downloadCount)} downloads</span>
-          {mod.lastUpdated && <span>updated {mod.lastUpdated}</span>}
-        </div>
+
+        {mod.version && (
+          <span className="absolute right-2.5 top-2.5 rounded-lg bg-black/70 px-2 py-1 font-mono text-2xs text-white/90">
+            v{mod.version}
+          </span>
+        )}
+
+        <button
+          onClick={() => shellOpen(mod.url).catch(() => {})}
+          className="absolute right-2.5 bottom-2.5 rounded-lg bg-black/70 p-1.5 text-white opacity-0 transition-opacity duration-base hover:bg-black/90 group-hover:opacity-100 focus-visible:opacity-100"
+          title="Open the mod page on Overtake.gg"
+          aria-label={`Open the Overtake.gg page for ${mod.title}`}
+        >
+          <Icon name="external" size={15} />
+        </button>
+
+        {/* The webview never reports a total size, so this is an honest sweep
+            pinned to the bottom of the cover. */}
+        {inFlight && (
+          <span className="progress-track progress-track-thin absolute inset-x-0 bottom-0 rounded-none">
+            <span className="progress-indeterminate block" />
+          </span>
+        )}
       </div>
 
-      <button
-        onClick={() => shellOpen(mod.url).catch(() => {})}
-        className="btn-subtle h-9 w-9 flex-shrink-0 !px-0"
-        title="Open the mod page on Overtake.gg"
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.8}
-            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-          />
-        </svg>
-      </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+        <h3 className="truncate text-sm font-semibold text-text-primary" title={mod.title}>
+          {mod.title}
+        </h3>
 
-      <button
-        onClick={() => onInstall(mod)}
-        disabled={Boolean(busyLabel)}
-        className={`!py-2 !text-xs ${
-          failed
-            ? "btn-danger animate-shake"
-            : installed && !busyLabel
-              ? "btn-ghost border-success/30 text-success"
-              : busyLabel
-                ? "btn-ghost"
-                : "btn-primary"
-        } w-[7.5rem] flex-shrink-0`}
-      >
-        {failed ? "Retry" : busyLabel ?? (installed ? "Reinstall" : "Install")}
-      </button>
+        <p className="truncate text-2xs text-text-muted">
+          {mod.author ? `by ${mod.author}` : "Unknown author"}
+          {mod.lastUpdated && ` · ${mod.lastUpdated}`}
+        </p>
+
+        <div className="mt-auto flex items-center gap-2 pt-2">
+          <span className="flex items-center gap-1 font-mono text-2xs text-text-muted">
+            <Icon name="download" size={12} />
+            {formatCount(mod.downloadCount)}
+          </span>
+
+          <button
+            onClick={() => onInstall(mod)}
+            disabled={Boolean(busyLabel)}
+            className={`ml-auto !py-1.5 !text-xs ${
+              failed
+                ? "btn-danger animate-shake"
+                : installed && !busyLabel
+                  ? "btn-ghost border-success/30 text-success"
+                  : busyLabel
+                    ? "btn-ghost"
+                    : "btn-primary"
+            } min-w-[6.5rem]`}
+          >
+            {failed ? "Retry" : busyLabel ?? (installed ? "Reinstall" : "Install")}
+          </button>
+        </div>
+      </div>
     </article>
   );
 });
@@ -511,24 +547,28 @@ const CatalogRow = memo(function CatalogRow({ mod, installed, onInstall }: Catal
 
 function EmptyCatalog({
   isSearching,
+  isFiltered,
   onSync,
+  onShowAll,
   isSyncing,
 }: {
   isSearching: boolean;
+  isFiltered: boolean;
   onSync: () => void;
+  onShowAll: () => void;
   isSyncing: boolean;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center py-20 text-center text-text-muted">
-      <svg className="mb-4 h-12 w-12 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1}
-          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-        />
-      </svg>
-      {isSearching ? (
+      <Icon name="inbox" size={48} className="mb-4 opacity-40" />
+      {isFiltered ? (
+        <>
+          <p className="text-sm">Everything here is already in your library.</p>
+          <button onClick={onShowAll} className="btn-subtle mt-2 !text-xs">
+            Show installed mods too
+          </button>
+        </>
+      ) : isSearching ? (
         <p className="text-sm">No cached mod matches that search.</p>
       ) : (
         <>
@@ -537,6 +577,7 @@ function EmptyCatalog({
             Sync once to pull the F1 Manager 2024 downloads section from Overtake.gg.
           </p>
           <button onClick={onSync} disabled={isSyncing} className="btn-primary">
+            <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
             Sync catalog
           </button>
         </>

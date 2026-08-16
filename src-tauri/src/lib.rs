@@ -160,6 +160,11 @@ pub fn run() {
                         {
                             let _ = std::fs::remove_dir(&legacy);
                         }
+
+                        // Undo only spans a session; anything still in the bin
+                        // is from a previous run and is dead weight in the
+                        // user's game folder.
+                        mod_manager::empty_trash(&normalized);
                     }
                 }
             }
@@ -394,6 +399,7 @@ pub fn run() {
             mod_manager::toggle_mod,
             mod_manager::set_all_mods_enabled,
             mod_manager::delete_mod,
+            mod_manager::restore_mod,
             mod_manager::detect_conflicts,
             mod_manager::apply_load_order,
             mod_manager::open_mods_folder,
