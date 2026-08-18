@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
@@ -28,6 +29,7 @@ import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
 import { LibrarySummary } from "../components/LibrarySummary";
 import { BulkActionBar } from "../components/BulkActionBar";
+import { NoticeCentre, type Notice } from "../components/NoticeCentre";
 import { ProfileBar } from "../components/ProfileBar";
 import { Icon } from "../components/Icon";
 import { useContextMenu, type MenuAction } from "../components/ContextMenu";
@@ -64,6 +66,13 @@ const SORT_LABELS: Record<LibrarySort, string> = {
   author: "Author",
 };
 
+/**
+ * Tags shown inline before the rest fold away. Enough for a normal library,
+ * few enough that the filter row cannot wrap into a second line and undo the
+ * point of merging the two rows in the first place.
+ */
+const TAGS_BEFORE_FOLD = 5;
+
 const FILTER_LABELS: Record<LibraryFilter, string> = {
   all: "All",
   active: "Active",
@@ -96,6 +105,7 @@ export function Library() {
   const [filter, setFilter] = useState<LibraryFilter>("all");
   /** Tag currently narrowing the list, independent of the status filter. */
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [showAllTags, setShowAllTags] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -104,6 +114,8 @@ export function Library() {
   // Every write into ~mods is refused while the game holds the .pak files
   // open, so the controls that write are disabled rather than left to fail.
   const gameRunning = useModStore((s) => s.gameRunning);
+  const gamePatched = useModStore((s) => s.gamePatched);
+  const setGamePatched = useModStore((s) => s.setGamePatched);
   const lockedHint = gameRunning ? "Close F1 Manager 24 first — its mod files are locked" : undefined;
 
   const [sort, setSort] = usePreference<LibrarySort>("library-sort", "order");
@@ -134,6 +146,12 @@ export function Library() {
     const names = new Map(mods.map((m) => [m.id, m.name]));
     const enabled = new Set(mods.filter((m) => m.enabled).map((m) => m.id));
 
+    // Row numbers come from the applied order, which is what `loadOrder`
+    // already encodes — the same list the badges are read against.
+    const position = new Map(
+      [...mods].sort((a, b) => a.loadOrder - b.loadOrder).map((m, index) => [m.id, index + 1])
+    );
+
     for (const conflict of conflicts) {
       const contenders = conflict.mods.filter((id) => enabled.has(id));
       if (contenders.length < 2) continue;
@@ -145,7 +163,10 @@ export function Library() {
       for (const id of contenders) {
         const entry = map.get(id) ?? { chunks: [] };
         entry.chunks.push(conflict.pakchunk);
-        if (id !== winner) entry.overriddenBy = names.get(winner);
+        if (id !== winner) {
+          entry.overriddenBy = names.get(winner);
+          entry.overriddenByPosition = position.get(winner);
+        }
         map.set(id, entry);
       }
     }
@@ -629,6 +650,9 @@ export function Library() {
     ]
   );
 
+  /** The row currently in the user's hand, for the floating ghost. */
+  const draggingMod = draggingId ? modsById.get(draggingId) : undefined;
+
   /** Which edge of the hovered row the dragged one would settle on. */
   const dropEdgeFor = useCallback(
     (id: string): "above" | "below" | undefined => {
@@ -666,6 +690,93 @@ export function Library() {
       />
     );
   });
+
+  /**
+   * The informational notices, in severity order so the collapsed summary
+   * reports the worst one.
+   */
+  const notices = useMemo<Notice[]>(() => {
+    const list: Notice[] = [];
+
+    // First: a patched game invalidates everything below it, so it explains
+    // the other notices rather than competing with them.
+    if (gamePatched) {
+      list.push({
+        id: "patched",
+        tone: "warning",
+        icon: "warning-solid",
+        message:
+          "F1 Manager 24 has been updated since you last opened this. Mods built for the previous version often stop working, and can stop the game launching at all.",
+        actions: [
+          {
+            label: "Disable all mods",
+            disabled: gameRunning,
+            title: lockedHint,
+            onClick: () => {
+              handleSetAll(false).then(() => setGamePatched(false));
+            },
+          },
+          { label: "Dismiss", onClick: () => setGamePatched(false) },
+        ],
+      });
+    }
+
+    if (filterCounts.broken > 0 && filter !== "broken") {
+      list.push({
+        id: "broken",
+        tone: "danger",
+        icon: "warning-solid",
+        message: `${filterCounts.broken} mod${filterCounts.broken === 1 ? "" : "s"} ${
+          filterCounts.broken === 1 ? "is" : "are"
+        } missing files in the game folder — a game update or a manual clean-up removes them.`,
+        actions: [{ label: "Show them", onClick: () => setFilter("broken") }],
+      });
+    }
+
+    if (updates.length > 0) {
+      list.push({
+        id: "updates",
+        tone: "accent",
+        icon: "upload",
+        message: `${updates.length} mod${updates.length === 1 ? " has" : "s have"} a newer version on Overtake.gg.`,
+        actions: [
+          { label: "Show them", onClick: () => setFilter("update") },
+          {
+            label: "Update all",
+            onClick: handleUpdateAll,
+            disabled: gameRunning,
+            title: lockedHint,
+          },
+        ],
+      });
+    }
+
+    if (sort !== "order" && !isGrid && mods.length > 1) {
+      list.push({
+        id: "sort",
+        tone: "info",
+        icon: "warning",
+        message: `Sorted by ${SORT_LABELS[sort].toLowerCase()} — dragging is off until you switch back to load order.`,
+        actions: [{ label: "Load order", onClick: () => setSort("order") }],
+      });
+    }
+
+    return list;
+  }, [
+    filterCounts.broken,
+    filter,
+    updates.length,
+    handleUpdateAll,
+    gameRunning,
+    lockedHint,
+    sort,
+    isGrid,
+    mods.length,
+    setSort,
+    gamePatched,
+    setGamePatched,
+    handleSetAll,
+  ]);
 
   return (
     <div className="flex h-full flex-col" data-density={density}>
@@ -823,6 +934,30 @@ export function Library() {
             );
           })}
 
+          {allTags.length > 0 && (
+            <>
+              <span className="mx-1 h-4 w-px bg-border" />
+              {(showAllTags ? allTags : allTags.slice(0, TAGS_BEFORE_FOLD)).map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+                  aria-pressed={tagFilter === tag}
+                  className={`filter-chip ${tagFilter === tag ? "filter-chip-active" : ""}`}
+                >
+                  {tag}
+                </button>
+              ))}
+              {allTags.length > TAGS_BEFORE_FOLD && (
+                <button
+                  onClick={() => setShowAllTags((v) => !v)}
+                  className="btn-subtle !py-1 !text-xs"
+                >
+                  {showAllTags ? "Fewer tags" : `+${allTags.length - TAGS_BEFORE_FOLD} tags`}
+                </button>
+              )}
+            </>
+          )}
+
           <span className="ml-auto flex items-center gap-1">
             <button
               onClick={() => handleSetAll(true)}
@@ -844,77 +979,11 @@ export function Library() {
         </div>
       )}
 
-      {/* Tags get their own row rather than joining the status chips: they are
-          the user's vocabulary, not the app's, and there can be many. */}
-      {allTags.length > 0 && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-border/70 px-6 py-2">
-          <Icon name="filter" size={13} className="text-text-muted" />
-          {allTags.map((tag) => (
-            <button
-              key={tag}
-              onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
-              aria-pressed={tagFilter === tag}
-              className={`filter-chip !py-0.5 ${tagFilter === tag ? "filter-chip-active" : ""}`}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* The library and the disk disagree. Worth interrupting for: a mod
-          listed as active whose files are gone is a mod the user believes is
-          working. */}
-      {filterCounts.broken > 0 && filter !== "broken" && (
-        <div className="flex flex-shrink-0 items-center gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2.5">
-          <Icon name="warning-solid" size={16} className="text-danger" />
-          <span className="flex-1 text-xs text-danger">
-            {filterCounts.broken} mod{filterCounts.broken === 1 ? "" : "s"} no longer
-            {filterCounts.broken === 1 ? " has" : " have"} all their files in the game folder — a
-            game update or a manual clean-up removes them.
-          </span>
-          <button
-            onClick={() => setFilter("broken")}
-            className="btn-ghost !py-1.5 !text-xs border-danger/30 text-danger"
-          >
-            Show them
-          </button>
-        </div>
-      )}
-
-      {updates.length > 0 && (
-        <div className="flex flex-shrink-0 items-center gap-3 border-b border-f1red/20 bg-f1red/10 px-6 py-2.5">
-          <Icon name="upload" size={16} className="text-f1red" />
-          <span className="flex-1 text-xs text-text-secondary">
-            {updates.length} mod{updates.length === 1 ? " has" : "s have"} a newer version on
-            Overtake.gg.
-          </span>
-          <button onClick={() => setFilter("update")} className="btn-subtle !py-1.5 !text-xs">
-            Show them
-          </button>
-          <button
-            onClick={handleUpdateAll}
-            disabled={gameRunning}
-            title={lockedHint}
-            className="btn-primary !py-1.5 !text-xs"
-          >
-            Update all
-          </button>
-        </div>
-      )}
-
-      {/* Sorting by anything else hides the order the game actually uses, so
-          dragging is off. Saying so beats a handle that silently does nothing. */}
-      {sort !== "order" && !isGrid && mods.length > 1 && (
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/70 bg-surface/40 px-6 py-2 text-xs text-text-muted">
-          <Icon name="warning" size={14} />
-          Sorted by {SORT_LABELS[sort].toLowerCase()} — switch back to load order to drag mods
-          around.
-          <button onClick={() => setSort("order")} className="btn-subtle !py-1 !text-xs">
-            Load order
-          </button>
-        </div>
-      )}
+      {/* Everything the app wants to say, in one strip.
+          Notices that explain a *disabled control* are not here — those live at
+          the app level with their own row, because a greyed-out button whose
+          reason is folded behind a chevron is just a broken button. */}
+      <NoticeCentre notices={notices} />
 
       {/* Pending reorder bar */}
       {hasUnappliedChanges && (
@@ -1022,6 +1091,23 @@ export function Library() {
             >
               <div className="flex flex-col gap-[var(--row-gap)] pb-4">{listBody}</div>
             </SortableContext>
+
+            {/* What you are holding. Without it dnd-kit slides the original row
+                around and there is nothing under the cursor, which reads as the
+                list rearranging itself rather than as you moving something. */}
+            <DragOverlay dropAnimation={null}>
+              {draggingMod && (
+                <div className="drag-ghost flex items-center gap-3 rounded-2xl border border-f1red/60 bg-surface-raised px-4 py-3 shadow-f1-strong">
+                  <Icon name="grip" size={16} className="text-f1red" />
+                  <span className="font-mono text-sm font-bold text-f1red">
+                    {(localOrder.indexOf(draggingMod.id) + 1).toString().padStart(2, "0")}
+                  </span>
+                  <span className="max-w-[22rem] truncate text-sm font-semibold text-text-primary">
+                    {draggingMod.name}
+                  </span>
+                </div>
+              )}
+            </DragOverlay>
           </DndContext>
         )}
       </div>

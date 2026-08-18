@@ -497,6 +497,27 @@ textarea:focus-visible {
   bottom: calc(var(--row-gap) / -2 - 1px);
 }
 
+/* ─── Toasts versus the selection bar ───────────────────────────
+   Both live on the bottom edge — the bar centred, the toasts to the right —
+   and on a narrow window they overlap. While a selection is active the bar
+   sets `data-bulk-bar` on the body and the toasts step over it. */
+body[data-bulk-bar] .toast-container {
+  transform: translateY(-3.75rem);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-container {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Drag ghost ────────────────────────────────────────────────
+   The row under the cursor while reordering. Tilted and lifted so it reads as
+   picked up rather than as a duplicate of the row it came from. */
+.drag-ghost {
+  transform: rotate(1.2deg) scale(1.02);
+  cursor: grabbing;
+}
+
 /* ─── Misc ─────────────────────────────────────────────────── */
 @keyframes shake {
   0%,

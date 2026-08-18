@@ -92,6 +92,11 @@ function ModTileBase({
               Disabled
             </span>
           )}
+          {mod.enabled && overriddenBy && !update && (
+            <span className="absolute right-2.5 top-2.5 rounded-lg bg-warning/85 px-2 py-1 text-2xs font-semibold uppercase tracking-wider text-black">
+              No effect
+            </span>
+          )}
           {update && (
             <span className="absolute right-2.5 top-2.5 rounded-lg bg-f1red px-2 py-1 text-2xs font-semibold uppercase tracking-wider text-white">
               Update
@@ -142,8 +147,16 @@ function ModTileBase({
           )}
 
           {overriddenBy && (
-            <p className="truncate text-2xs text-warning" title={`Overridden by ${overriddenBy}`}>
-              Overridden by {overriddenBy}
+            <p
+              className="flex items-center gap-1 truncate text-2xs text-warning"
+              title={`Enabled, but covered by "${overriddenBy}" — no effect in game`}
+            >
+              {standing?.overriddenByPosition !== undefined && (
+                <span className="font-mono">
+                  ↑ {standing.overriddenByPosition.toString().padStart(2, "0")}
+                </span>
+              )}
+              <span className="truncate">covered by {overriddenBy}</span>
             </p>
           )}
 

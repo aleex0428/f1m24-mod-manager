@@ -58,7 +58,6 @@ function AppShell() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePreference("sidebar-collapsed", false);
-  const [gamePatched, setGamePatched] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -110,7 +109,9 @@ function AppShell() {
       // install — or on everyone's first launch of this version.
       if (valid) {
         const patched = await invoke<boolean>("check_game_patched").catch(() => false);
-        if (patched) setGamePatched(true);
+        // Surfaced by the library's notice centre rather than another bar
+        // here: it is advice about mods, and its action is a mod action.
+        if (patched) useModStore.getState().setGamePatched(true);
       }
     };
 
@@ -343,35 +344,6 @@ function AppShell() {
             <WindowControls />
           </div>
         </header>
-
-        {gamePatched && (
-          <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning/20 bg-warning/10 px-5 py-2 text-xs text-warning">
-            <Icon name="warning-solid" size={16} />
-            <span className="flex-1">
-              F1 Manager 24 has been updated since you last opened this. Mods built for the previous
-              version often stop working, and can stop the game launching at all.
-            </span>
-            <button
-              onClick={() => {
-                invoke<number>("set_all_mods_enabled", { enabled: false })
-                  .then(async (changed) => {
-                    await loadMods();
-                    setGamePatched(false);
-                    toast.success(
-                      changed === 0 ? "Nothing was enabled" : `${changed} mods disabled`
-                    );
-                  })
-                  .catch((err) => toast.error(String(err)));
-              }}
-              className="btn-ghost !py-1 !text-xs border-warning/30 text-warning"
-            >
-              Disable all mods
-            </button>
-            <button onClick={() => setGamePatched(false)} className="btn-subtle !py-1 !text-xs">
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {gameRunning && (
           <div className="flex flex-shrink-0 items-center gap-2 border-b border-info/20 bg-info/10 px-5 py-2 text-xs text-info">

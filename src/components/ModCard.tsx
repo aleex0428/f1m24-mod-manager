@@ -86,11 +86,19 @@ function ModCardBase({
               : "border-border-subtle opacity-70 hover:opacity-100"
         } ${isDragging ? "z-50 border-f1red/60 shadow-f1-strong" : "shadow-elev-1"}`}
       >
-        {/* Active accent rail */}
+        {/* The rail says what this mod is doing, at a glance and without
+            reading: solid red for applying, amber for enabled-but-covered,
+            nothing for disabled. A mod that is on yet has no effect is the
+            state people misread most often. */}
         <span
           className={`absolute inset-y-0 left-0 w-[3px] transition-colors ${
-            mod.enabled ? "bg-f1red" : "bg-transparent"
+            !mod.enabled ? "bg-transparent" : overriddenBy ? "bg-warning/70" : "bg-f1red"
           }`}
+          title={
+            overriddenBy
+              ? `Enabled, but covered by "${overriddenBy}" — no effect in game`
+              : undefined
+          }
         />
 
         {/* Selection. Hidden until it is relevant — a checkbox on every row at
@@ -229,7 +237,11 @@ function ModCardBase({
             <IntegrityBadge integrity={mod.integrity} />
             {contested.length > 0 &&
               (overriddenBy ? (
-                <ConflictBadge chunks={contested} overriddenBy={overriddenBy} />
+                <ConflictBadge
+                  chunks={contested}
+                  overriddenBy={overriddenBy}
+                  overriddenByPosition={standing?.overriddenByPosition}
+                />
               ) : (
                 <span
                   className="chip flex-shrink-0 border-success/25 bg-success/10 text-success"

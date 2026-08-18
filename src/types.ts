@@ -81,6 +81,11 @@ export interface ConflictStanding {
   chunks: number[];
   /** Name of the mod that overrides this one, when it loses. */
   overriddenBy?: string;
+  /**
+   * Where that mod sits in the list, so a losing row can point at it. Reading
+   * "covered by 01" and looking up beats reading a name and hunting for it.
+   */
+  overriddenByPosition?: number;
 }
 
 export interface UpdateAvailable {

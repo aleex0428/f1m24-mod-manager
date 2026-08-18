@@ -9,6 +9,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
     <Toaster
       position="bottom-right"
+      containerClassName="toast-container"
       gutter={10}
       toastOptions={{
         duration: 4000,

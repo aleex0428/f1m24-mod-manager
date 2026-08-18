@@ -321,6 +321,21 @@ Anything the *user* authored (notes, favourites) must also survive a mod being
 updated, which deletes the old record and writes a new one. `install_groups`
 reads those fields before the delete and carries them across.
 
+## Bars above the list
+Every notice was added on its own merit; together they could stack twelve deep
+(nine in the library, three in the shell) and leave a 600px-tall window — the
+configured minimum — with no room for the list.
+
+- Informational notices go through `NoticeCentre`, which is **one row** however
+  many it holds and collapses to a count past the first.
+- **Anything that explains why a control is disabled stays its own row**: the
+  game running, and an invalid game path. A greyed-out button whose reason is
+  folded behind a chevron is just a broken button. This is the rule to apply
+  when adding the next notice.
+- Unapplied load order also keeps its row — it is unsaved work, not a notice.
+- Filters and tags share a row (tags fold past `TAGS_BEFORE_FOLD`), and the
+  summary collapses to one line, remembered.
+
 ## Library sorting versus load order
 The list has two orderings and they are not the same thing. `localOrder` is the
 load order — what the game obeys, what a profile stores, what dragging edits.

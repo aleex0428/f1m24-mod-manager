@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Icon } from "./Icon";
 
 /**
@@ -22,6 +23,17 @@ export function BulkActionBar({
   onTop: () => void;
   onClear: () => void;
 }) {
+  // Tells the stylesheet to lift the toasts, which otherwise sit under this
+  // bar on a narrow window. An attribute rather than shared state: nothing
+  // else needs to know, and it cannot get out of sync with what is rendered.
+  useEffect(() => {
+    if (count === 0) return;
+    document.body.dataset.bulkBar = "1";
+    return () => {
+      delete document.body.dataset.bulkBar;
+    };
+  }, [count]);
+
   if (count === 0) return null;
 
   return (

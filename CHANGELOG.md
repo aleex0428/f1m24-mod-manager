@@ -24,6 +24,11 @@ All notable changes to F1M24 Mod Manager are documented here.
   applying stay separate decisions. The file never contains the mods
   themselves, so nobody's work gets redistributed and every download still goes
   through its author's page.
+- **You can see what the load order is doing.** A mod that is switched on but
+  covered by another now says so on its own row — an amber marker instead of
+  the red one, and a badge pointing at the row number that beats it. Being
+  enabled and having no effect is the state people misread most often, and
+  until now it was something you worked out from a number and a sentence.
 - **Your own tags on a mod**, with a filter row and suggestions drawn from tags
   you have already used.
 - **Notes and favourites.** Write yourself a note on any mod — why it is
@@ -33,6 +38,20 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Improved
 
+- **The bars above the list no longer crowd it out.** Notices had grown to the
+  point where a patched game, missing files and pending updates could stack
+  twelve strips deep and leave a small window with almost no room for the mods
+  themselves. They share one strip now, which collapses to a count — while
+  anything that explains why a control is greyed out keeps its own row, because
+  a disabled button whose reason is hidden is just a broken button. Filters and
+  tags share a row, and the summary folds to a single line.
+- **Conflicts are readable again.** The compatibility matrix was one column per
+  contested chunk and became a sideways-scrolling grid of dots the moment you
+  had a few. It is a list now, grouped by chunk, naming which mod wins and
+  which are having no effect.
+- **Dragging a mod shows what you are holding**, a floating copy that follows
+  the cursor, and the toasts step out of the way of the selection bar instead
+  of appearing underneath it.
 - **The library can be sorted without disturbing the load order.** View it by
   name, size, install date or author while the order the game obeys stays put.
   Dragging switches off while a different sort is showing, and says why —

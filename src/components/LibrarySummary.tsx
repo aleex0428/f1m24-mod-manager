@@ -1,4 +1,5 @@
 import { Icon, type IconName } from "./Icon";
+import { usePreference } from "../hooks/usePreference";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { formatBytes } from "../lib/format";
 import type { LibraryFilter } from "../pages/Library";
@@ -34,8 +35,40 @@ export function LibrarySummary({
   onFilter,
   onCheckUpdates,
 }: SummaryProps) {
+  // Four tiles is a lot of vertical space to spend permanently on numbers you
+  // mostly glance at once. Collapsed, the same figures survive as one line.
+  const [collapsed, setCollapsed] = usePreference("library-summary-collapsed", false);
+
+  if (collapsed) {
+    return (
+      <button
+        onClick={() => setCollapsed(false)}
+        className="flex flex-shrink-0 items-center gap-3 border-b border-border/70 px-6 py-1.5 text-left text-2xs text-text-muted transition-colors hover:bg-surface/40"
+        aria-expanded={false}
+      >
+        <span className="font-mono text-text-secondary">
+          {active}/{total}
+        </span>
+        <span>active</span>
+        {diskBytes > 0 && <span className="font-mono">{formatBytes(diskBytes)}</span>}
+        {conflicts > 0 && <span className="text-warning">{conflicts} conflicts</span>}
+        {updates > 0 && <span className="text-f1red">{updates} updates</span>}
+        <Icon name="chevron-down" size={13} className="ml-auto" />
+      </button>
+    );
+  }
+
   return (
-    <div className="grid flex-shrink-0 grid-cols-2 gap-2 border-b border-border/70 px-6 py-3 lg:grid-cols-4">
+    <div className="relative grid flex-shrink-0 grid-cols-2 gap-2 border-b border-border/70 px-6 py-3 lg:grid-cols-4">
+      <button
+        onClick={() => setCollapsed(true)}
+        className="absolute right-1.5 top-1.5 rounded p-1 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary"
+        title="Collapse the summary"
+        aria-label="Collapse the summary"
+        aria-expanded
+      >
+        <Icon name="chevron-up" size={13} />
+      </button>
       <Tile
         icon="power"
         label="Active"
