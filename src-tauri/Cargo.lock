@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "f1m24-mod-manager"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "chrono",
  "hex",

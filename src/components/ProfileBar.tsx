@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 
 import { Icon } from "./Icon";
 import { Modal, ModalHeader } from "./Modal";
+import { ImportProfileModal } from "./ImportProfileModal";
 import { useModStore } from "../store/modStore";
 import type { ApplyReport, Profile } from "../types";
 
@@ -22,6 +23,7 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
   const [isManageOpen, setIsManageOpen] = useState(false);
   const [isSaveOpen, setIsSaveOpen] = useState(false);
   const [pendingApply, setPendingApply] = useState<Profile | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -123,6 +125,35 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
     [refresh]
   );
 
+  const handleExport = useCallback(async (profile: Profile) => {
+    try {
+      const path = await invoke<string>("export_profile_dialog", {
+        id: profile.id,
+        name: profile.name,
+      });
+      // Both separators: Windows hands back backslashes, and splitting on
+      // only one of them would show the whole path instead of the file name.
+      toast.success(`Exported to ${path.split(/[\\/]/).pop()}`);
+    } catch (err) {
+      const message = String(err);
+      // Closing the picker is not a failure worth a red toast.
+      if (!message.includes("No file selected") && !message.includes("cancelled")) {
+        toast.error(message);
+      }
+    }
+  }, []);
+
+  const handlePickImport = useCallback(async () => {
+    try {
+      setImporting(await invoke<string>("pick_profile_file"));
+    } catch (err) {
+      const message = String(err);
+      if (!message.includes("No file selected") && !message.includes("cancelled")) {
+        toast.error(message);
+      }
+    }
+  }, []);
+
   const active = profiles.find((p) => p.id === activeId);
 
   return (
@@ -169,6 +200,24 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
               title={`Make “${active.name}” match the library as it is now`}
             >
               Update
+            </button>
+          )}
+          <button
+            onClick={handlePickImport}
+            className="btn-subtle !py-1.5 !text-xs"
+            title="Open a profile someone shared with you"
+          >
+            <Icon name="upload" size={13} />
+            Import
+          </button>
+          {active && (
+            <button
+              onClick={() => handleExport(active)}
+              className="btn-subtle !py-1.5 !text-xs"
+              title={`Save “${active.name}” to a file you can share`}
+            >
+              <Icon name="download" size={13} />
+              Export
             </button>
           )}
           <button
@@ -299,11 +348,19 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
                 }
               }}
               onOverwrite={() => handleOverwrite(profile)}
+              onExport={() => handleExport(profile)}
               onDelete={() => handleDelete(profile)}
             />
           ))}
         </div>
       </Modal>
+
+      <ImportProfileModal
+        isOpen={importing !== null}
+        contents={importing}
+        onClose={() => setImporting(null)}
+        onImported={() => refresh()}
+      />
     </>
   );
 }
@@ -313,12 +370,14 @@ function ProfileRow({
   isActive,
   onRename,
   onOverwrite,
+  onExport,
   onDelete,
 }: {
   profile: Profile;
   isActive: boolean;
   onRename: (name: string) => void;
   onOverwrite: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const [name, setName] = useState(profile.name);
@@ -349,6 +408,10 @@ function ProfileRow({
 
       <button onClick={onOverwrite} className="btn-subtle !py-1.5 !text-xs" title="Overwrite with the current library">
         Update
+      </button>
+
+      <button onClick={onExport} className="btn-icon-sm" title="Export to a file" aria-label={`Export ${profile.name}`}>
+        <Icon name="download" size={14} />
       </button>
 
       <button

@@ -17,6 +17,15 @@ All notable changes to F1M24 Mod Manager are documented here.
   built for the previous build, and until now the app said nothing. It notices
   the executable has changed and offers to disable everything so you can find
   out which mod is the problem — or start the game and see.
+- **Share a profile.** Export one to a small file — the Overtake.gg link,
+  version and order of each mod — and send it to someone. Opening it shows what
+  they already have, what would be downloaded and what cannot be fetched,
+  before anything is touched: the profile is saved, and downloading and
+  applying stay separate decisions. The file never contains the mods
+  themselves, so nobody's work gets redistributed and every download still goes
+  through its author's page.
+- **Your own tags on a mod**, with a filter row and suggestions drawn from tags
+  you have already used.
 - **Notes and favourites.** Write yourself a note on any mod — why it is
   disabled, what it clashed with — and pin the ones you care about. Both
   survive updating the mod, because a note belongs to the mod rather than to
@@ -24,6 +33,13 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Improved
 
+- **The library can be sorted without disturbing the load order.** View it by
+  name, size, install date or author while the order the game obeys stays put.
+  Dragging switches off while a different sort is showing, and says why —
+  rearranging a list that is not in load order would move things somewhere you
+  cannot see.
+- **Update every mod in one go** instead of one click each, from a bar that
+  appears when updates are found.
 - **Syncing the catalogue no longer re-reads all of it.** The listing is
   ordered newest-first, so a routine sync now stops as soon as it reaches
   entries it already has — usually one or two pages instead of eleven. A

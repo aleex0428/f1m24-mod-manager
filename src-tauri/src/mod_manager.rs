@@ -1064,6 +1064,75 @@ pub fn set_mod_notes(mod_id: String, notes: String, state: State<AppState>) -> R
     conn.save()
 }
 
+/// Replace a mod's tags.
+///
+/// The field has existed on `ModRecord` since the first release and was always
+/// written empty — this is what finally gives it a meaning. Normalised on the
+/// way in (trimmed, de-duplicated case-insensitively, capped) so the filter and
+/// the autocomplete never have to guess whether "Livery" and "livery" are the
+/// same tag. They are.
+#[tauri::command]
+pub fn set_mod_tags(
+    mod_id: String,
+    tags: Vec<String>,
+    state: State<AppState>,
+) -> Result<Vec<String>, String> {
+    let cleaned = normalise_tags(tags);
+
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    let record = conn
+        .data
+        .mods
+        .get_mut(&mod_id)
+        .ok_or("That mod is no longer installed")?;
+
+    record.tags = cleaned.clone();
+    conn.save()?;
+    Ok(cleaned)
+}
+
+/// Every tag in use, for the filter row and the autocomplete.
+#[tauri::command]
+pub fn list_tags(state: State<AppState>) -> Result<Vec<String>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let mut seen: Vec<String> = Vec::new();
+    for record in conn.data.mods.values() {
+        for tag in &record.tags {
+            if !seen.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                seen.push(tag.clone());
+            }
+        }
+    }
+    seen.sort_by_key(|t| t.to_lowercase());
+    Ok(seen)
+}
+
+/// Longest a single tag may be. Long enough for "endurance liveries", short
+/// enough that a tag stays a label rather than becoming a second notes field.
+const MAX_TAG_LEN: usize = 24;
+/// Cap per mod, so the row never turns into a wall of chips.
+const MAX_TAGS: usize = 8;
+
+fn normalise_tags(tags: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let clipped: String = trimmed.chars().take(MAX_TAG_LEN).collect();
+        if out.iter().any(|t: &String| t.eq_ignore_ascii_case(&clipped)) {
+            continue;
+        }
+        out.push(clipped);
+        if out.len() >= MAX_TAGS {
+            break;
+        }
+    }
+    out
+}
+
 /// Pin or unpin a mod.
 #[tauri::command]
 pub fn set_mod_favourite(
@@ -1349,6 +1418,26 @@ mod tests {
     #[test]
     fn reads_pakchunk_numbers() {
         assert_eq!(extract_pakchunks(&["pakchunk42-WindowsNoEditor.pak".into()]), vec![42]);
+    }
+
+    #[test]
+    fn tags_are_normalised_so_the_filter_can_trust_them() {
+        let tags = normalise_tags(vec![
+            "  Livery ".into(),
+            "livery".into(), // same tag in another case
+            "".into(),       // nothing at all
+            "   ".into(),
+            "a".repeat(40),  // longer than the cap
+        ]);
+
+        // "Livery" and the over-long one survive; the case-duplicate and the
+        // two blanks do not.
+        assert_eq!(tags.len(), 2, "blank entries and the duplicate are dropped");
+        assert_eq!(tags[0], "Livery", "the first spelling wins, trimmed");
+        assert_eq!(tags[1].chars().count(), MAX_TAG_LEN, "clipped, not rejected");
+
+        let many = normalise_tags((0..20).map(|i| format!("tag{i}")).collect());
+        assert_eq!(many.len(), MAX_TAGS, "capped per mod");
     }
 
     #[test]

@@ -14,6 +14,26 @@ export interface Profile {
   createdAt: string;
 }
 
+/** One mod inside a shared profile file. */
+export interface SharedMod {
+  title: string;
+  url: string;
+  version: string | null;
+  enabled: boolean;
+}
+
+/**
+ * What importing a shared profile would involve, worked out before anything is
+ * written. Purely informational — reading a file changes nothing.
+ */
+export interface ImportPreview {
+  name: string;
+  alreadyInstalled: string[];
+  downloadable: SharedMod[];
+  /** Installed from a local file by the exporter, so there is no page to fetch. */
+  unavailable: string[];
+}
+
 /** What applying a profile actually did. */
 export interface ApplyReport {
   enabled: number;

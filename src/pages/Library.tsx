@@ -49,6 +49,21 @@ export type LibraryFilter =
   | "broken"
   | "favourite";
 
+/**
+ * How the list is *shown*. Deliberately separate from load order, which is what
+ * the game obeys: wanting to find the biggest mod on disk should not mean
+ * rearranging what overrides what.
+ */
+export type LibrarySort = "order" | "name" | "size" | "installed" | "author";
+
+const SORT_LABELS: Record<LibrarySort, string> = {
+  order: "Load order",
+  name: "Name",
+  size: "Size on disk",
+  installed: "Recently installed",
+  author: "Author",
+};
+
 const FILTER_LABELS: Record<LibraryFilter, string> = {
   all: "All",
   active: "Active",
@@ -79,6 +94,8 @@ export function Library() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
+  /** Tag currently narrowing the list, independent of the status filter. */
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [showConflicts, setShowConflicts] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -88,6 +105,8 @@ export function Library() {
   // open, so the controls that write are disabled rather than left to fail.
   const gameRunning = useModStore((s) => s.gameRunning);
   const lockedHint = gameRunning ? "Close F1 Manager 24 first — its mod files are locked" : undefined;
+
+  const [sort, setSort] = usePreference<LibrarySort>("library-sort", "order");
 
   const [viewMode, setViewMode] = usePreference<"list" | "grid">("library-view", "list");
   const [density, setDensity] = usePreference<"comfortable" | "compact">(
@@ -143,6 +162,7 @@ export function Library() {
       .filter((m): m is Mod => Boolean(m));
 
     return list.filter((mod) => {
+      if (tagFilter && !(mod.tags ?? []).includes(tagFilter)) return false;
       if (normalizedQuery) {
         const haystack = `${mod.name} ${mod.author ?? ""}`.toLowerCase();
         if (!haystack.includes(normalizedQuery)) return false;
@@ -166,13 +186,53 @@ export function Library() {
           return true;
       }
     });
-  }, [localOrder, modsById, normalizedQuery, filter, standingByMod, updatesByMod]);
+  }, [localOrder, modsById, normalizedQuery, filter, tagFilter, standingByMod, updatesByMod]);
+
+  /**
+   * The visible list. `order` returns it untouched — `localOrder` already *is*
+   * the load order, so sorting by it would be a no-op that only risks
+   * disagreeing with the drag state.
+   */
+  const visibleMods = useMemo(() => {
+    if (sort === "order") return orderedMods;
+
+    const sorted = [...orderedMods];
+    switch (sort) {
+      case "name":
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "size":
+        sorted.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
+        break;
+      case "installed":
+        // Newest first. Missing dates sink rather than sorting as epoch zero.
+        sorted.sort((a, b) => (b.installedAt || "").localeCompare(a.installedAt || ""));
+        break;
+      case "author":
+        sorted.sort((a, b) =>
+          (a.author || "￿").localeCompare(b.author || "￿")
+        );
+        break;
+    }
+    return sorted;
+  }, [orderedMods, sort]);
+
+  /** Every tag in use, for the filter row. */
+  const allTags = useMemo(() => {
+    const seen = new Set<string>();
+    for (const mod of mods) for (const tag of mod.tags ?? []) seen.add(tag);
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  }, [mods]);
 
   const enabledCount = useMemo(() => mods.filter((m) => m.enabled).length, [mods]);
   const diskBytes = useMemo(() => mods.reduce((sum, m) => sum + (m.sizeBytes || 0), 0), [mods]);
-  const isNarrowed = normalizedQuery.length > 0 || filter !== "all";
-  /** Reordering only makes sense against the whole, ordered list. */
-  const canReorder = !isNarrowed && !isGrid;
+  const isNarrowed = normalizedQuery.length > 0 || filter !== "all" || tagFilter !== null;
+  /**
+   * Reordering only makes sense against the whole list, shown in the order it
+   * actually applies. Dragging row 3 above row 1 while sorted by name would
+   * move it somewhere the user cannot see.
+   */
+  const canReorder = !isNarrowed && !isGrid && sort === "order";
 
   const filterCounts = useMemo(
     () => ({
@@ -266,6 +326,20 @@ export function Library() {
     }
   }, []);
 
+  /**
+   * Queue every pending update at once.
+   *
+   * The queue is serial and each job is deduplicated by mod id, so this is
+   * simply the per-mod action repeated — no new download machinery, and the
+   * Pit Wall shows them arriving one by one exactly as before.
+   */
+  const handleUpdateAll = useCallback(() => {
+    if (updates.length === 0) return;
+    for (const update of updates) applyUpdate(update);
+    setUpdates([]);
+    toast.success(`${updates.length} update${updates.length === 1 ? "" : "s"} queued`);
+  }, [updates, applyUpdate]);
+
   // Commands from the palette land here, so there is one implementation of
   // each action rather than one per entry point.
   useEffect(() => {
@@ -273,18 +347,21 @@ export function Library() {
     const install = () => handleInstallFile();
     const check = () => handleCheckUpdates();
     const verify = () => handleVerify();
+    const updateAll = () => handleUpdateAll();
 
     window.addEventListener("app:focus-search", focus);
     window.addEventListener("app:install-file", install);
     window.addEventListener("app:check-updates", check);
     window.addEventListener("app:verify-files", verify);
+    window.addEventListener("app:update-all", updateAll);
     return () => {
       window.removeEventListener("app:focus-search", focus);
       window.removeEventListener("app:install-file", install);
       window.removeEventListener("app:check-updates", check);
       window.removeEventListener("app:verify-files", verify);
+      window.removeEventListener("app:update-all", updateAll);
     };
-  }, [handleInstallFile, handleCheckUpdates, handleVerify]);
+  }, [handleInstallFile, handleCheckUpdates, handleVerify, handleUpdateAll]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -381,7 +458,7 @@ export function Library() {
         // Shift extends from the last row clicked, over the list as it is
         // currently filtered — the range you can see is the range you get.
         if (event.shiftKey && lastClickedRef.current) {
-          const ids = orderedMods.map((m) => m.id);
+          const ids = visibleMods.map((m) => m.id);
           const from = ids.indexOf(lastClickedRef.current);
           const to = ids.indexOf(id);
           if (from >= 0 && to >= 0) {
@@ -397,7 +474,7 @@ export function Library() {
       });
       lastClickedRef.current = id;
     },
-    [orderedMods]
+    [visibleMods]
   );
 
   const clearSelection = useCallback(() => setSelection(new Set()), []);
@@ -419,14 +496,14 @@ export function Library() {
         clearSelection();
         return;
       }
-      if (e.key.toLowerCase() === "a" && e.ctrlKey && !typing && orderedMods.length > 0) {
+      if (e.key.toLowerCase() === "a" && e.ctrlKey && !typing && visibleMods.length > 0) {
         e.preventDefault();
-        setSelection(new Set(orderedMods.map((m) => m.id)));
+        setSelection(new Set(visibleMods.map((m) => m.id)));
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection.size, clearSelection, orderedMods]);
+  }, [selection.size, clearSelection, visibleMods]);
 
   const bulkSetEnabled = useCallback(
     async (enabled: boolean) => {
@@ -563,7 +640,7 @@ export function Library() {
     [draggingId, overId, localOrder]
   );
 
-  const listBody = orderedMods.map((mod, index) => {
+  const listBody = visibleMods.map((mod, index) => {
     const position = localOrder.indexOf(mod.id);
     return (
       <ModCard
@@ -599,7 +676,7 @@ export function Library() {
           <p className="mt-0.5 text-sm text-text-muted">
             {mods.length === 0
               ? "Nothing installed yet"
-              : `${orderedMods.length}${isNarrowed ? ` of ${mods.length}` : ""} shown`}
+              : `${visibleMods.length}${isNarrowed ? ` of ${mods.length}` : ""} shown`}
             {conflicts.length > 0 && (
               <button
                 onClick={() => setShowConflicts((v) => !v)}
@@ -632,6 +709,20 @@ export function Library() {
 
           {mods.length > 1 && (
             <>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as LibrarySort)}
+                aria-label="Sort the list"
+                title="Changes how the list is shown, not the order the game loads mods in"
+                className="input !w-auto !py-2 !pr-8 !text-xs"
+              >
+                {(Object.keys(SORT_LABELS) as LibrarySort[]).map((key) => (
+                  <option key={key} value={key}>
+                    {SORT_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+
               {/* View mode */}
               <div className="flex overflow-hidden rounded-xl border border-border" role="group" aria-label="View mode">
                 <ViewButton
@@ -753,6 +844,24 @@ export function Library() {
         </div>
       )}
 
+      {/* Tags get their own row rather than joining the status chips: they are
+          the user's vocabulary, not the app's, and there can be many. */}
+      {allTags.length > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-border/70 px-6 py-2">
+          <Icon name="filter" size={13} className="text-text-muted" />
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+              aria-pressed={tagFilter === tag}
+              className={`filter-chip !py-0.5 ${tagFilter === tag ? "filter-chip-active" : ""}`}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* The library and the disk disagree. Worth interrupting for: a mod
           listed as active whose files are gone is a mod the user believes is
           working. */}
@@ -769,6 +878,40 @@ export function Library() {
             className="btn-ghost !py-1.5 !text-xs border-danger/30 text-danger"
           >
             Show them
+          </button>
+        </div>
+      )}
+
+      {updates.length > 0 && (
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-f1red/20 bg-f1red/10 px-6 py-2.5">
+          <Icon name="upload" size={16} className="text-f1red" />
+          <span className="flex-1 text-xs text-text-secondary">
+            {updates.length} mod{updates.length === 1 ? " has" : "s have"} a newer version on
+            Overtake.gg.
+          </span>
+          <button onClick={() => setFilter("update")} className="btn-subtle !py-1.5 !text-xs">
+            Show them
+          </button>
+          <button
+            onClick={handleUpdateAll}
+            disabled={gameRunning}
+            title={lockedHint}
+            className="btn-primary !py-1.5 !text-xs"
+          >
+            Update all
+          </button>
+        </div>
+      )}
+
+      {/* Sorting by anything else hides the order the game actually uses, so
+          dragging is off. Saying so beats a handle that silently does nothing. */}
+      {sort !== "order" && !isGrid && mods.length > 1 && (
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/70 bg-surface/40 px-6 py-2 text-xs text-text-muted">
+          <Icon name="warning" size={14} />
+          Sorted by {SORT_LABELS[sort].toLowerCase()} — switch back to load order to drag mods
+          around.
+          <button onClick={() => setSort("order")} className="btn-subtle !py-1 !text-xs">
+            Load order
           </button>
         </div>
       )}
@@ -822,7 +965,7 @@ export function Library() {
               or install a .zip / .pak you already have
             </button>
           </div>
-        ) : orderedMods.length === 0 ? (
+        ) : visibleMods.length === 0 ? (
           <div className="py-16 text-center">
             <p className="text-sm text-text-muted">
               {normalizedQuery
@@ -833,6 +976,7 @@ export function Library() {
               onClick={() => {
                 setQuery("");
                 setFilter("all");
+                setTagFilter(null);
               }}
               className="btn-subtle mt-2 !text-xs"
             >
@@ -841,7 +985,7 @@ export function Library() {
           </div>
         ) : isGrid ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3 pb-6">
-            {orderedMods.map((mod, index) => (
+            {visibleMods.map((mod, index) => (
               <ModTile
                 key={mod.id}
                 mod={mod}
@@ -872,7 +1016,7 @@ export function Library() {
             }}
           >
             <SortableContext
-              items={orderedMods.map((m) => m.id)}
+              items={visibleMods.map((m) => m.id)}
               strategy={verticalListSortingStrategy}
               disabled={!canReorder}
             >

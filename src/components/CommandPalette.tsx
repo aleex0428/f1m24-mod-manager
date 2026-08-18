@@ -197,6 +197,17 @@ export function CommandPalette({
         },
       },
       {
+        id: "act-update-all",
+        group: "Actions",
+        label: "Update every mod with a newer version",
+        icon: "upload",
+        keywords: "update all upgrade",
+        perform: () => {
+          navigate("/library");
+          dispatch("app:update-all");
+        },
+      },
+      {
         id: "act-verify",
         group: "Actions",
         label: "Verify installed files",

@@ -424,6 +424,8 @@ pub fn run() {
             mod_manager::verify_mods,
             mod_manager::set_mod_notes,
             mod_manager::set_mod_favourite,
+            mod_manager::set_mod_tags,
+            mod_manager::list_tags,
             // Profiles
             profiles::list_profiles,
             profiles::get_active_profile,
@@ -432,6 +434,11 @@ pub fn run() {
             profiles::rename_profile,
             profiles::delete_profile,
             profiles::apply_profile,
+            profiles::export_profile,
+            profiles::preview_shared_profile,
+            profiles::import_shared_profile,
+            profiles::export_profile_dialog,
+            profiles::pick_profile_file,
             // Diagnostics
             diagnostics::open_log_folder,
             diagnostics::collect_diagnostics,

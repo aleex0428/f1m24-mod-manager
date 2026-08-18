@@ -4,6 +4,7 @@ import { BackgroundBlur } from "./BackgroundBlur";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
 import { ModCover } from "./ModCover";
+import { TagEditor } from "./TagEditor";
 import { setModFavourite, setModNotes } from "../lib/modActions";
 import { formatBytes, formatDate } from "../lib/format";
 import type { Mod, UpdateAvailable } from "../types";
@@ -125,6 +126,13 @@ export function ModDetailsModal({
           />
           <Detail label="Checksum" value={mod.checksum ? `${mod.checksum.slice(0, 12)}…` : "—"} mono />
         </dl>
+
+        <div className="mt-6">
+          <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+            Tags
+          </h3>
+          <TagEditor modId={mod.id} tags={mod.tags ?? []} />
+        </div>
 
         <div className="mt-6">
           <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">

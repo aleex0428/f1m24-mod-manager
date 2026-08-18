@@ -290,6 +290,26 @@ something.
   already matches — that call renames every mod file, and running it for nothing
   is pure churn on a folder that can hold hundreds.
 
+## Sharing a profile
+The exported file carries **references, not files**: each mod's Overtake page,
+version and position. Bundling the `.pak` files would redistribute other
+people's work without asking and route users around the download counts their
+authors are judged by.
+
+- Mod ids are local to an installation, so matching an imported profile against
+  the local library is done **by Overtake URL**. `normalise_url` is what makes
+  that comparison reliable — the queue stores the `/download` form while the
+  catalogue stores the page — and it is tested, because a mismatch silently
+  re-downloads something the user already has.
+- Importing is read-only until the user acts: `preview_shared_profile` reports,
+  `import_shared_profile` only saves a profile. Downloading and applying are
+  separate. Opening a file someone sent you must not rearrange a mod folder.
+- The file picker lives in Rust, like every other dialog here, so the frontend
+  still needs no filesystem permission — see `capabilities/default.json`, which
+  states that rule.
+- `format` is versioned from day one, and a file from a newer version is
+  refused with an explanation rather than half-parsed.
+
 ## Adding a field to `ModRecord`
 **Every new field needs `#[serde(default)]`.** A `mods.json` written by an older
 build has no such key, and `DbStore` renames a library it cannot parse to
@@ -300,6 +320,16 @@ pinning the pre-1.1 shape; keep it passing.
 Anything the *user* authored (notes, favourites) must also survive a mod being
 updated, which deletes the old record and writes a new one. `install_groups`
 reads those fields before the delete and carries them across.
+
+## Library sorting versus load order
+The list has two orderings and they are not the same thing. `localOrder` is the
+load order — what the game obeys, what a profile stores, what dragging edits.
+`LibrarySort` only decides how the list is *shown*.
+
+Dragging is disabled unless the view is in load order (and unfiltered, and not
+in grid), because dropping row 3 above row 1 while sorted by name would move the
+mod somewhere the user cannot see. Selection follows the visible list, so
+Shift-click and Ctrl+A always mean what is on screen.
 
 ## Catalogue sync
 The listing is requested with `order=last_update&direction=desc`, so once a

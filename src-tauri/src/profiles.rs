@@ -11,7 +11,7 @@
 // was saved is not in it, so applying that profile disables the new mod. The UI
 // says so before the first apply.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
@@ -249,6 +249,297 @@ pub fn apply_profile(id: String, state: State<AppState>) -> Result<ApplyReport, 
     Ok(report)
 }
 
+// ─── Sharing ─────────────────────────────────────────────────────
+//
+// The exported file carries **references, not files**: each mod's Overtake
+// page, its version and its place in the order. Bundling the `.pak` files would
+// mean redistributing other people's work without asking, and routing people
+// around the download counts their authors are judged by. A shared profile is a
+// recommendation; whoever accepts it downloads from the author.
+
+/// One mod inside an exported profile.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedMod {
+    pub title: String,
+    /// Overtake page. Empty for a mod installed from a local file, which
+    /// therefore cannot be resolved on the other end — reported, not silently
+    /// dropped.
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    pub enabled: bool,
+}
+
+/// The file format. Versioned from day one so a future change has somewhere to
+/// announce itself instead of just failing to parse.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedProfile {
+    #[serde(default = "default_format")]
+    pub format: u32,
+    pub name: String,
+    #[serde(default)]
+    pub exported_at: String,
+    pub mods: Vec<SharedMod>,
+}
+
+fn default_format() -> u32 {
+    1
+}
+
+/// Current format number.
+const FORMAT: u32 = 1;
+
+/// What an import would mean, worked out before anything is written.
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreview {
+    pub name: String,
+    /// Mods in the file that are already installed here.
+    pub already_installed: Vec<String>,
+    /// Mods that can be fetched, with the page to fetch them from.
+    pub downloadable: Vec<SharedMod>,
+    /// Mods with no usable Overtake link — installed from a local file by
+    /// whoever exported it, so there is nothing to point at.
+    pub unavailable: Vec<String>,
+}
+
+/// Turn a profile into the shareable structure.
+#[tauri::command]
+pub fn export_profile(id: String, state: State<AppState>) -> Result<String, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let profile = conn
+        .data
+        .profiles
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or("That profile no longer exists")?;
+
+    let enabled: std::collections::HashSet<&String> = profile.enabled_mod_ids.iter().collect();
+
+    // Walk the profile's own order so the file preserves it. Mods it names that
+    // are no longer installed simply cannot be described.
+    let mods: Vec<SharedMod> = profile
+        .order
+        .iter()
+        .filter_map(|mod_id| conn.data.mods.get(mod_id))
+        .map(|m| SharedMod {
+            title: m.name.clone(),
+            url: m.source_url.clone().unwrap_or_default(),
+            version: m.version.clone(),
+            enabled: enabled.contains(&m.id),
+        })
+        .collect();
+
+    let shared = SharedProfile {
+        format: FORMAT,
+        name: profile.name.clone(),
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        mods,
+    };
+
+    log::info!("profile exported: {} ({} mods)", shared.name, shared.mods.len());
+    serde_json::to_string_pretty(&shared).map_err(|e| e.to_string())
+}
+
+/// Read a shared profile and say what importing it would involve.
+///
+/// Read-only on purpose: opening a file somebody sent you must not rearrange
+/// your mod folder. It reports; the user decides what happens next.
+#[tauri::command]
+pub fn preview_shared_profile(
+    contents: String,
+    state: State<AppState>,
+) -> Result<ImportPreview, String> {
+    let shared: SharedProfile = serde_json::from_str(&contents)
+        .map_err(|_| "That file is not a mod profile this app can read".to_string())?;
+
+    if shared.format > FORMAT {
+        return Err(
+            "That profile was made by a newer version of the app. Update and try again.".into(),
+        );
+    }
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let installed: std::collections::HashSet<String> = conn
+        .data
+        .mods
+        .values()
+        .filter_map(|m| m.source_url.as_ref())
+        .map(|u| normalise_url(u))
+        .collect();
+
+    let mut preview = ImportPreview { name: shared.name, ..Default::default() };
+
+    for entry in shared.mods {
+        if entry.url.trim().is_empty() {
+            preview.unavailable.push(entry.title);
+        } else if installed.contains(&normalise_url(&entry.url)) {
+            preview.already_installed.push(entry.title);
+        } else {
+            preview.downloadable.push(entry);
+        }
+    }
+
+    Ok(preview)
+}
+
+/// Save a shared profile locally, matching its mods to what is installed.
+/// Nothing is downloaded, enabled or reordered here.
+#[tauri::command]
+pub fn import_shared_profile(contents: String, state: State<AppState>) -> Result<Profile, String> {
+    let shared: SharedProfile = serde_json::from_str(&contents)
+        .map_err(|_| "That file is not a mod profile this app can read".to_string())?;
+
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Matched by Overtake page: mod ids are local to each installation, so the
+    // URL is the only thing two machines can agree on.
+    let by_url: std::collections::HashMap<String, String> = conn
+        .data
+        .mods
+        .values()
+        .filter_map(|m| m.source_url.as_ref().map(|u| (normalise_url(u), m.id.clone())))
+        .collect();
+
+    let mut order = Vec::new();
+    let mut enabled = Vec::new();
+    for entry in &shared.mods {
+        if let Some(local_id) = by_url.get(&normalise_url(&entry.url)) {
+            order.push(local_id.clone());
+            if entry.enabled {
+                enabled.push(local_id.clone());
+            }
+        }
+    }
+
+    // A duplicate name would be indistinguishable in the picker.
+    let mut name = shared.name.trim().to_string();
+    if name.is_empty() {
+        name = "Imported profile".into();
+    }
+    let mut candidate = name.clone();
+    let mut suffix = 2;
+    while conn.data.profiles.iter().any(|p| p.name.eq_ignore_ascii_case(&candidate)) {
+        candidate = format!("{name} ({suffix})");
+        suffix += 1;
+    }
+
+    let profile = Profile {
+        id: Uuid::new_v4().to_string(),
+        name: candidate,
+        enabled_mod_ids: enabled,
+        order,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    log::info!(
+        "profile imported: {} ({} of {} mods matched locally)",
+        profile.name,
+        profile.order.len(),
+        shared.mods.len()
+    );
+
+    conn.data.profiles.push(profile.clone());
+    conn.save()?;
+    Ok(profile)
+}
+
+/// Extension for a shared profile. Distinct enough that Windows will not steal
+/// it from another app, and obvious enough to recognise in a Downloads folder.
+const PROFILE_EXT: &str = "f1mprofile";
+
+/// Ask where to put the file, then write it.
+///
+/// The dialog runs in Rust like every other one in this app, so the frontend
+/// keeps needing no filesystem permission at all — see the capability file,
+/// which says exactly that.
+#[tauri::command]
+pub async fn export_profile_dialog(
+    id: String,
+    name: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let json = export_profile(id, state)?;
+
+    // A blocking recv() would stall a runtime worker for as long as the dialog
+    // is open, so the result is awaited.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<std::path::PathBuf>>();
+
+    let suggested = format!("{}.{PROFILE_EXT}", slugify(&name));
+    app.dialog()
+        .file()
+        .set_file_name(&suggested)
+        .add_filter("Mod profile", &[PROFILE_EXT])
+        .save_file(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+
+    let selected = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
+    let path = selected.ok_or_else(|| "No file selected".to_string())?;
+
+    std::fs::write(&path, json).map_err(|e| format!("Could not write the file: {e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Ask for a file and hand back its contents, unparsed.
+///
+/// Reading is all this does. Whether anything is imported is decided later, by
+/// the user, after seeing the preview.
+#[tauri::command]
+pub async fn pick_profile_file(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<std::path::PathBuf>>();
+
+    app.dialog()
+        .file()
+        .add_filter("Mod profile", &[PROFILE_EXT, "json"])
+        .pick_file(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+
+    let selected = rx.await.map_err(|_| "Dialog cancelled".to_string())?;
+    let path = selected.ok_or_else(|| "No file selected".to_string())?;
+
+    std::fs::read_to_string(&path).map_err(|e| format!("Could not read the file: {e}"))
+}
+
+/// A profile name turned into something safe to put on a filesystem.
+fn slugify(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+
+    // Collapse runs of separators and trim them off the ends, so "Season 2026!"
+    // becomes "season-2026" rather than "season-2026-".
+    let collapsed = slug
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    if collapsed.is_empty() { "profile".to_string() } else { collapsed }
+}
+
+/// Compare Overtake pages the way the rest of the app does: a trailing slash
+/// and a `/download` suffix are noise, and case never matters.
+fn normalise_url(url: &str) -> String {
+    url.trim()
+        .trim_end_matches('/')
+        .trim_end_matches("/download")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     /// Rebuild the order a profile should produce, given what is installed now.
@@ -269,6 +560,37 @@ mod tests {
             }
         }
         order
+    }
+
+    /// Matching an imported profile to a local library hangs entirely on this:
+    /// mod ids differ between machines, so the Overtake page is the only shared
+    /// identity. A mod written one way here and another way there would import
+    /// as "not installed" and be queued for a download the user already has.
+    #[test]
+    fn a_profile_name_becomes_a_usable_filename() {
+        assert_eq!(super::slugify("Season 2026"), "season-2026");
+        assert_eq!(super::slugify("Season 2026!"), "season-2026", "no trailing separator");
+        assert_eq!(super::slugify("  //  "), "profile", "never an empty filename");
+        assert_eq!(super::slugify("Clásicos"), "clásicos", "letters survive, whatever the alphabet");
+    }
+
+    #[test]
+    fn urls_compare_the_same_however_they_were_written() {
+        let canonical = super::normalise_url("https://www.overtake.gg/downloads/f1-elite.85465/");
+
+        assert_eq!(
+            super::normalise_url("https://www.overtake.gg/downloads/f1-elite.85465"),
+            canonical
+        );
+        assert_eq!(
+            super::normalise_url("https://www.overtake.gg/downloads/f1-elite.85465/download"),
+            canonical,
+            "the queue stores the download form"
+        );
+        assert_eq!(
+            super::normalise_url("  HTTPS://WWW.OVERTAKE.GG/downloads/F1-Elite.85465/  "),
+            canonical
+        );
     }
 
     #[test]

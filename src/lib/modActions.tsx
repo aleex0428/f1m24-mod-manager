@@ -144,6 +144,20 @@ export async function setModFavourite(modId: string, favourite: boolean): Promis
   }
 }
 
+/** Replace a mod's tags. The backend normalises and returns what it stored. */
+export async function setModTags(modId: string, tags: string[]): Promise<void> {
+  const previous = useModStore.getState().mods.find((m) => m.id === modId)?.tags ?? [];
+  useModStore.getState().updateMod(modId, { tags });
+  try {
+    const stored = await invoke<string[]>("set_mod_tags", { modId, tags });
+    // Trust the backend's version: it trims, de-duplicates and caps.
+    useModStore.getState().updateMod(modId, { tags: stored });
+  } catch (err) {
+    useModStore.getState().updateMod(modId, { tags: previous });
+    toast.error(String(err));
+  }
+}
+
 /** Save the user's note for a mod. */
 export async function setModNotes(modId: string, notes: string): Promise<void> {
   const previous = useModStore.getState().mods.find((m) => m.id === modId)?.notes;
