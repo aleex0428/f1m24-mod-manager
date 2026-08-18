@@ -415,6 +415,64 @@ pub fn game_is_running() -> bool {
     is_game_running()
 }
 
+// ─── Has the game been patched? ──────────────────────────────────
+//
+// A game update rewrites the executable and frequently invalidates every
+// installed mod: `.pak` files built against the old build stop loading, or make
+// the game refuse to start. The app used to say nothing, so "it worked
+// yesterday" turned into a support question with no way to answer it.
+//
+// The stamp is the executable's size and modification time. Not a hash: hashing
+// a 100 MB binary on every launch to answer a question this cheap would be
+// absurd, and size-plus-mtime already changes on any real patch.
+
+/// Setting key holding the stamp seen last time.
+const GAME_STAMP: &str = "game_exe_stamp";
+
+fn game_stamp(game_path: &str) -> Option<String> {
+    let exe = PathBuf::from(normalize_path(game_path)).join(GAME_EXE);
+    let meta = std::fs::metadata(exe).ok()?;
+    let modified = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!("{}:{}", meta.len(), modified))
+}
+
+/// Whether the game's executable changed since the last time we looked.
+///
+/// Records the current stamp as a side effect, so each patch is reported once.
+/// The **first** call for an installation only records — there is nothing to
+/// compare against, and warning everyone that their game was "updated" the day
+/// they install this version would be a lie told to every single user.
+#[tauri::command]
+pub fn check_game_patched(state: tauri::State<crate::AppState>) -> Result<bool, String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let game_path = conn.get_setting("game_path").unwrap_or_default();
+    let Some(stamp) = game_stamp(&game_path) else {
+        return Ok(false); // no game folder to judge
+    };
+
+    let previous = conn.get_setting(GAME_STAMP).unwrap_or_default();
+    if previous == stamp {
+        return Ok(false);
+    }
+
+    conn.set_setting(GAME_STAMP.to_string(), stamp.clone())?;
+    conn.save()?;
+
+    if previous.is_empty() {
+        log::info!("game stamp recorded for the first time");
+        return Ok(false);
+    }
+
+    log::info!("game executable changed ({previous} -> {stamp})");
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

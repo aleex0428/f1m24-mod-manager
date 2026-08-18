@@ -143,7 +143,13 @@ export function Browse() {
   }, [hasMore, query, sort, fetchPage, mods.length]);
 
   // ─── Catalog sync ─────────────────────────────────────────
-  const handleSync = useCallback(async () => {
+  /**
+   * `deep` walks every page; a routine sync stops as soon as it reaches
+   * entries it already has. The listing is ordered newest-first, so that is
+   * sound — but it is the one shortcut that could lose data quietly if the
+   * site ever changed, which is why the full walk stays one click away.
+   */
+  const handleSync = useCallback(async (deep = false) => {
     if (inFlightRef.current) return;
     setIsSyncing(true);
     setSyncProgress({ current_page: 0, total_pages: 1, mods_found: 0 });
@@ -151,8 +157,10 @@ export function Browse() {
     let unlisten: UnlistenFn | undefined;
     try {
       unlisten = await listen<SyncProgress>("sync-progress", (e) => setSyncProgress(e.payload));
-      const count = await invoke<number>("sync_overtake_database");
-      toast.success(`Catalog synced — ${count} mods`);
+      const count = await invoke<number>("sync_overtake_database", { deep });
+      toast.success(
+        deep ? `Full sync complete — ${count} mods` : `Catalog synced — ${count} new or updated`
+      );
       pageRef.current = 0;
       setHasMore(true);
       await fetchPage(query, 0, false, sort);
@@ -169,7 +177,7 @@ export function Browse() {
   // Ctrl+R and the command palette both arrive here.
   useEffect(() => {
     const onSync = () => {
-      if (!isSyncing) handleSync();
+      if (!isSyncing) handleSync(false);
     };
     window.addEventListener("app:sync-catalog", onSync);
     return () => window.removeEventListener("app:sync-catalog", onSync);
@@ -301,10 +309,26 @@ export function Browse() {
             From URL
           </button>
 
-          <button onClick={handleSync} disabled={isSyncing} className="btn-ghost !py-2" title="Ctrl+R">
-            <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
-            {isSyncing ? "Syncing…" : "Sync catalog"}
-          </button>
+          <div className="flex overflow-hidden rounded-xl border border-border">
+            <button
+              onClick={() => handleSync(false)}
+              disabled={isSyncing}
+              className="flex items-center gap-2 px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary disabled:opacity-50"
+              title="Fetch what is new since the last sync (Ctrl+R)"
+            >
+              <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
+              {isSyncing ? "Syncing…" : "Sync catalog"}
+            </button>
+            <span className="w-px bg-border" />
+            <button
+              onClick={() => handleSync(true)}
+              disabled={isSyncing}
+              className="px-2.5 py-2 text-xs text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:opacity-50"
+              title="Walk every page and rebuild the whole catalogue"
+            >
+              Deep
+            </button>
+          </div>
         </div>
 
         <div className="flex w-full items-center gap-3 text-xs text-text-muted">
@@ -339,7 +363,7 @@ export function Browse() {
           <span className="flex-1 text-xs text-warning">
             The catalogue was last synced {catalogAgeDays} days ago — new mods and updates are missing.
           </span>
-          <button onClick={handleSync} className="btn-ghost !py-1.5 !text-xs border-warning/30 text-warning">
+          <button onClick={() => handleSync(false)} className="btn-ghost !py-1.5 !text-xs border-warning/30 text-warning">
             Sync now
           </button>
         </div>
@@ -378,7 +402,7 @@ export function Browse() {
           <EmptyCatalog
             isSearching={query.length > 0}
             isFiltered={hideInstalled && mods.length > 0}
-            onSync={handleSync}
+            onSync={() => handleSync(false)}
             onShowAll={() => setHideInstalled(false)}
             isSyncing={isSyncing}
           />

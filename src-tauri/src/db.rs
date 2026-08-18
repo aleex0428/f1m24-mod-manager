@@ -49,6 +49,24 @@ pub struct ModRecord {
     pub favourite: bool,
 }
 
+/// A named set of mods to have active, and the order to load them in.
+///
+/// A profile declares the **complete** list of what should be enabled: anything
+/// it does not name gets disabled when it is applied. That is what makes it a
+/// reproducible state rather than a bundle of suggestions, and it is the only
+/// way a "clean, no mods" profile can exist at all.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    /// Ids to enable. Ids that are no longer installed are ignored on apply.
+    pub enabled_mod_ids: Vec<String>,
+    /// Load order, highest priority first — the same direction the UI shows.
+    pub order: Vec<String>,
+    pub created_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ModCache {
@@ -69,6 +87,10 @@ pub struct AppDatabase {
     pub mods: HashMap<String, ModRecord>,
     pub mod_cache: HashMap<String, ModCache>,
     pub settings: HashMap<String, String>,
+    /// Saved profiles. Small enough to live beside the library — and switching
+    /// profiles rewrites the library anyway, so keeping them together costs
+    /// nothing the catalogue split was protecting.
+    pub profiles: Vec<Profile>,
 }
 
 /// On-disk shape of `mods.json`.
@@ -78,6 +100,8 @@ struct LibraryFile {
     mods: HashMap<String, ModRecord>,
     #[serde(default)]
     settings: HashMap<String, String>,
+    #[serde(default)]
+    profiles: Vec<Profile>,
     /// Read but never written back: builds before 1.0.1 kept the catalogue here.
     #[serde(default, skip_serializing)]
     mod_cache: HashMap<String, ModCache>,
@@ -133,6 +157,7 @@ impl DbStore {
             data: AppDatabase {
                 mods: library.mods,
                 settings: library.settings,
+                profiles: library.profiles,
                 mod_cache: if migrating { library.mod_cache } else { catalog.mod_cache },
             },
         };
@@ -155,6 +180,7 @@ impl DbStore {
             &LibraryFile {
                 mods: self.data.mods.clone(),
                 settings: self.data.settings.clone(),
+                profiles: self.data.profiles.clone(),
                 mod_cache: HashMap::new(),
             },
         )

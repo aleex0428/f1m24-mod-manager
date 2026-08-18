@@ -9,7 +9,7 @@ import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
 import { linkOvertakeAccount } from "../lib/auth";
 import { setModEnabled, uninstallMod } from "../lib/modActions";
-import type { CatalogMod } from "../types";
+import type { ApplyReport, CatalogMod, Profile } from "../types";
 
 /** Commands the shell owns rather than the palette. */
 interface PaletteHooks {
@@ -61,6 +61,7 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [catalogHits, setCatalogHits] = useState<CatalogMod[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -73,6 +74,7 @@ export function CommandPalette({
     setQuery("");
     setActiveIndex(0);
     setCatalogHits([]);
+    invoke<Profile[]>("list_profiles").then(setProfiles).catch(() => setProfiles([]));
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
     return () => {
       clearTimeout(timer);
@@ -262,6 +264,27 @@ export function CommandPalette({
       },
     ];
 
+    for (const profile of profiles) {
+      list.push({
+        id: `profile-${profile.id}`,
+        group: "Profiles",
+        label: `Switch to ${profile.name}`,
+        detail: `${profile.enabledModIds.length} mods`,
+        icon: "library",
+        keywords: `profile preset ${profile.name}`,
+        perform: () => {
+          invoke<ApplyReport>("apply_profile", { id: profile.id })
+            .then(async (report) => {
+              await hooks.reloadMods();
+              toast.success(
+                `${profile.name} — ${report.enabled} enabled, ${report.disabled} disabled`
+              );
+            })
+            .catch((err) => toast.error(String(err)));
+        },
+      });
+    }
+
     for (const mod of mods) {
       list.push({
         id: `mod-toggle-${mod.id}`,
@@ -312,7 +335,7 @@ export function CommandPalette({
     }
 
     return list;
-  }, [mods, catalogHits, navigate, hooks, dispatch]);
+  }, [mods, catalogHits, profiles, navigate, hooks, dispatch]);
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();

@@ -1,5 +1,28 @@
 // ─── Shared TypeScript types ─────────────────────────────────
 
+/**
+ * A named set of mods to have active, and the order to load them in.
+ *
+ * `enabledModIds` is the complete list: applying a profile disables anything
+ * it does not name.
+ */
+export interface Profile {
+  id: string;
+  name: string;
+  enabledModIds: string[];
+  order: string[];
+  createdAt: string;
+}
+
+/** What applying a profile actually did. */
+export interface ApplyReport {
+  enabled: number;
+  disabled: number;
+  /** Mods the profile names that are no longer installed. */
+  missing: number;
+  orderUnchanged: boolean;
+}
+
 /** Whether what the library claims is installed is actually on disk. */
 export type ModIntegrity = "ok" | "incomplete" | "missing" | "modified";
 
@@ -135,6 +158,8 @@ export interface DownloadJob {
   speed?: number;
   filename?: string;
   error?: string;
+  /** Automatic retries already spent on this job. */
+  retries?: number;
 }
 
 export type UpdateStage =

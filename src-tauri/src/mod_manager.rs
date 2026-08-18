@@ -120,8 +120,14 @@ pub enum ModIntegrity {
     Incomplete,
     /// None of them are.
     Missing,
-    /// Present, but the bytes no longer hash to what was installed. Only ever
-    /// produced by `verify_mods`, never by a plain listing.
+    /// Present, but the bytes no longer hash to what was installed.
+    ///
+    /// Never constructed here, and that is correct: `verify_mods` returns the
+    /// ids it found and the UI applies this state to them, because the result
+    /// is deliberately not persisted — it is a snapshot of one check, not a
+    /// property of the mod. The variant exists so the Rust and TypeScript
+    /// definitions of this contract stay the same shape.
+    #[allow(dead_code)]
     Modified,
 }
 

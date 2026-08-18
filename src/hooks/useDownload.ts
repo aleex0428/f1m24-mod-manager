@@ -10,6 +10,23 @@ const ERR_AUTH_REQUIRED = "AUTH_REQUIRED";
 /** How long a finished job stays visible in the Pit Wall. */
 const COMPLETED_TTL_MS = 8000;
 
+/**
+ * Automatic retries before a download is left as failed.
+ *
+ * There is no resuming to be had: downloads run through the ghost webview so
+ * they carry the user's Cloudflare session, and Tauri's download API exposes
+ * only the destination path and a finished/failed flag — no handle on the
+ * transfer, no Range header, no pause. Replacing it with our own HTTP client
+ * would mean losing the session that makes downloading possible at all.
+ *
+ * So a broken transfer restarts. What that buys is that the *common* failure —
+ * a moment of bad connectivity — resolves itself instead of leaving a red row
+ * for the user to notice and press Retry on.
+ */
+const MAX_AUTO_RETRIES = 2;
+/** 4s then 12s. Long enough for a blip to pass, short enough to still care. */
+const RETRY_BACKOFF_MS = [4000, 12000];
+
 interface StartedPayload {
   id: string;
   filename: string;
@@ -183,7 +200,41 @@ export function useDownload() {
         return;
       }
 
+      const job = store.jobs[id];
+      const attempts = job?.retries ?? 0;
       const message = error || "Download failed";
+
+      // Retry the transient case automatically. A job that has already failed
+      // twice is left alone: something is wrong that waiting will not fix, and
+      // an endless retry loop hides that.
+      if (attempts < MAX_AUTO_RETRIES) {
+        const wait = RETRY_BACKOFF_MS[attempts] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
+        const seconds = Math.round(wait / 1000);
+
+        // It has to stay `error` for the wait, not `queued`: the pump starts
+        // anything queued the moment a slot frees, so queueing it here would
+        // retry instantly and the backoff would be decorative. `error` is not
+        // an active status, so the rest of the queue still moves.
+        store.updateJob(id, {
+          status: "error",
+          retries: attempts + 1,
+          error: `${message} — retrying in ${seconds}s`,
+          speed: 0,
+          downloadedBytes: 0,
+        });
+
+        const timer = setTimeout(() => {
+          timers.delete(`retry-${id}`);
+          const current = useModStore.getState().jobs[id];
+          // Gone, cancelled, or already retried by hand: leave it be.
+          if (current && current.status === "error") {
+            useModStore.getState().updateJob(id, { status: "queued", error: undefined });
+          }
+        }, wait);
+        timers.set(`retry-${id}`, timer);
+        return;
+      }
+
       store.updateJob(id, { status: "error", error: message, speed: 0 });
       store.pushNotification("error", "Download failed", message);
       toast.error(message);
@@ -217,5 +268,8 @@ export function retryDownload(jobId: string) {
     downloadedBytes: 0,
     speed: 0,
     progress: 0,
+    // Asking by hand is a fresh start: the automatic attempts already spent
+    // should not count against a retry the user chose to make.
+    retries: 0,
   });
 }

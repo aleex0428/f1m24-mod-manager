@@ -242,6 +242,92 @@ these were cover art and enlarged them threefold.
   rewrite on write so new data is born correct. A missing variant just 404s
   into the generated poster.
 
+## Writing into `~mods`
+Every operation the app performs on the game folder is a rename, a move or a
+delete of a `.pak` the game **memory-maps while it runs**. Windows refuses those
+on an open file, so an operation attempted mid-session fails *partway*: some
+files in a group renamed, some not — the one state the naming scheme cannot
+describe.
+
+- `game_detector::ensure_game_closed()` guards every such command:
+  `install_mod`, `toggle_mod`, `set_all_mods_enabled`, `apply_load_order`,
+  `delete_mod`, `restore_mod`, `resolve_install_variant`, `apply_profile`. A new
+  command that touches the folder must call it too — one helper, so the wording
+  is identical wherever it is hit.
+- `is_game_running()` caches its answer for 1.5 s. Enumerating processes costs
+  tens of milliseconds and `set_all_mods_enabled` calls `toggle_mod` once per
+  mod; without the cache, sixty mods meant sixty full scans.
+- Matched on the exact executable name. A `contains` would lock the user out of
+  their own mod folder on a false positive, which is worse than the race the
+  guard prevents. The guard is best-effort by design.
+
+## Library versus disk
+The library records what *was* installed; the folder is edited by game updates
+and by hand. Two checks, split by cost:
+
+- **Presence** runs on every `get_mods`, because it reads the directory listing
+  the size calculation already needs. Produces `missing` / `incomplete`.
+- **Checksums** run only from `verify_mods`, because that means re-reading
+  hundreds of megabytes. The result is *not* persisted — it is a snapshot of one
+  check, so the UI applies `modified` to the ids it returns.
+- `integrity_from_presence` is pure and tested. The cases that matter are the
+  ones that must not raise an alarm: no game path configured, and a record that
+  names no files.
+
+## Profiles
+A profile stores the **complete** list of mods to enable, not a set of additions.
+Anything it does not name is disabled when it is applied. That is what makes it
+a state you can return to, and the only way "Clean (no mods)" can exist — but it
+also surprises people, so the UI confirms before an apply that would disable
+something.
+
+- Stored in `mods.json`: small, and switching profiles rewrites the library
+  anyway, so it costs nothing the catalogue split was protecting.
+- Mods installed since a profile was saved are appended to the **end** of its
+  order. Inserting them anywhere else would let a new mod silently outrank a
+  deliberate arrangement.
+- `apply_profile` skips `apply_load_order` entirely when the resulting order
+  already matches — that call renames every mod file, and running it for nothing
+  is pure churn on a folder that can hold hundreds.
+
+## Adding a field to `ModRecord`
+**Every new field needs `#[serde(default)]`.** A `mods.json` written by an older
+build has no such key, and `DbStore` renames a library it cannot parse to
+`mods.corrupt.json` and starts empty — so a missing attribute turns an app
+update into what looks exactly like losing your library. `db.rs` has a test
+pinning the pre-1.1 shape; keep it passing.
+
+Anything the *user* authored (notes, favourites) must also survive a mod being
+updated, which deletes the old record and writes a new one. `install_groups`
+reads those fields before the delete and carries them across.
+
+## Catalogue sync
+The listing is requested with `order=last_update&direction=desc`, so once a
+whole page contains nothing new and nothing re-dated, every page after it is
+older still — that is what licenses the early exit. `page_has_news` is the rule
+and it is tested, because a mistake there does not fail loudly, it silently
+misses mods. `sync_overtake_database(deep: true)` always walks everything, and
+is the way back if the site ever stops honouring the sort.
+
+## Downloads cannot resume
+Tauri's `DownloadEvent` exposes only `Requested { url, destination }` and
+`Finished { url, path, success }` — no handle on the transfer, no `Range`
+header, no pause. WebView2 has it natively; it is not surfaced. Resuming would
+mean replacing the ghost webview with our own HTTP client, which would lose the
+Cloudflare session that makes downloading work at all.
+
+So a failed download **restarts**. `useDownload` retries twice with a backoff,
+and the job stays in `error` for the wait rather than `queued` — the pump starts
+anything queued the moment a slot frees, so queueing it would retry instantly
+and the backoff would be decorative.
+
+## Logging
+`tauri-plugin-log` writes to the log dir and stdout. **The webview target is
+deliberately absent**: it would capture console output from the ghost webview,
+which is where the Overtake session lives. `diagnostics.rs` reports session
+state as a bare yes/no for the same reason — that text is written to be pasted
+in public.
+
 ## Uninstall and undo
 `delete_mod` takes an `undoable` flag. With it, the mod's files are **moved**
 into `<mods_dir>/.f1m24-undo/<modId>/` and its record is written beside them as

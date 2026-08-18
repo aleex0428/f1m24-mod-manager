@@ -28,6 +28,7 @@ import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
 import { LibrarySummary } from "../components/LibrarySummary";
 import { BulkActionBar } from "../components/BulkActionBar";
+import { ProfileBar } from "../components/ProfileBar";
 import { Icon } from "../components/Icon";
 import { useContextMenu, type MenuAction } from "../components/ContextMenu";
 import { useModStore } from "../store/modStore";
@@ -695,6 +696,8 @@ export function Library() {
           </button>
         </div>
       </div>
+
+      {mods.length > 0 && <ProfileBar onApplied={loadMods} />}
 
       {mods.length > 0 && (
         <LibrarySummary

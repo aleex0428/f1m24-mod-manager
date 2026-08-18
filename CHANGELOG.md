@@ -6,12 +6,34 @@ All notable changes to F1M24 Mod Manager are documented here.
 
 ### Added
 
+- **Profiles.** Save the mods you have active, and the order they load in,
+  under a name — "Season 2026", "Classics", "Clean" — and switch between them
+  in one click. A profile is the complete list of what should be on, so
+  switching to one turns off anything it does not include; nothing is ever
+  deleted, and the app says what changed. Mods installed since a profile was
+  saved keep their place at the end of the order rather than jumping ahead of
+  the arrangement you built.
+- **A warning when the game has been patched.** F1 Manager updates break mods
+  built for the previous build, and until now the app said nothing. It notices
+  the executable has changed and offers to disable everything so you can find
+  out which mod is the problem — or start the game and see.
 - **Notes and favourites.** Write yourself a note on any mod — why it is
   disabled, what it clashed with — and pin the ones you care about. Both
   survive updating the mod, because a note belongs to the mod rather than to
   the version of it you happen to have installed.
 
 ### Improved
+
+- **Syncing the catalogue no longer re-reads all of it.** The listing is
+  ordered newest-first, so a routine sync now stops as soon as it reaches
+  entries it already has — usually one or two pages instead of eleven. A
+  **Deep** sync beside the button still walks everything, for when you want the
+  whole catalogue rebuilt.
+- **A download that fails is retried on its own**, twice, with a pause between
+  attempts, so a moment of bad connectivity no longer leaves a red row waiting
+  for you to notice it. The rest of the queue carries on meanwhile. Note that a
+  retry restarts the file: downloads go through a real browser session to get
+  past Cloudflare, and that route offers no way to resume a partial transfer.
 
 ### Fixed
 

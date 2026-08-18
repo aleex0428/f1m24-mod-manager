@@ -11,6 +11,7 @@ mod launcher;
 mod mod_manager;
 mod mod_updater;
 mod notify;
+mod profiles;
 mod scraper_backend;
 
 use std::path::PathBuf;
@@ -423,11 +424,20 @@ pub fn run() {
             mod_manager::verify_mods,
             mod_manager::set_mod_notes,
             mod_manager::set_mod_favourite,
+            // Profiles
+            profiles::list_profiles,
+            profiles::get_active_profile,
+            profiles::save_profile,
+            profiles::update_profile,
+            profiles::rename_profile,
+            profiles::delete_profile,
+            profiles::apply_profile,
             // Diagnostics
             diagnostics::open_log_folder,
             diagnostics::collect_diagnostics,
             diagnostics::get_log_dir,
             game_detector::game_is_running,
+            game_detector::check_game_patched,
             mod_manager::detect_conflicts,
             mod_manager::apply_load_order,
             mod_manager::open_mods_folder,

@@ -120,9 +120,24 @@ pub fn get_catalog_stats(state: tauri::State<AppState>) -> Result<CatalogStats, 
 
 #[tauri::command]
 pub async fn sync_overtake_database(
+    deep: Option<bool>,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
+    // A routine sync stops as soon as it reaches pages it already knows; a deep
+    // one always walks the lot. See `page_has_news` for why that is safe.
+    let deep = deep.unwrap_or(false);
+
+    // Snapshot of what is already cached, taken once: the comparison below runs
+    // per mod per page and must not take the lock each time.
+    let known: std::collections::HashMap<String, String> = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.data
+            .mod_cache
+            .values()
+            .map(|m| (m.overtake_id.clone(), m.last_updated.clone()))
+            .collect()
+    };
     if let Some(existing) = app.get_webview_window("scraper") {
         let _ = existing.close();
     }
@@ -155,7 +170,7 @@ pub async fn sync_overtake_database(
     .map_err(|e| e.to_string())?;
 
     // Any early exit from here on must close the window.
-    let result = run_sync(&app, &state, &win, &shared_json).await;
+    let result = run_sync(&app, &state, &win, &shared_json, deep, &known).await;
     let _ = win.close();
 
     if let Ok(count) = &result {
@@ -176,6 +191,8 @@ async fn run_sync(
     state: &tauri::State<'_, AppState>,
     win: &tauri::WebviewWindow,
     shared_json: &std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    deep: bool,
+    known: &std::collections::HashMap<String, String>,
 ) -> Result<usize, String> {
     let mut current_page = 1usize;
     let mut total_pages;
@@ -213,6 +230,8 @@ async fn run_sync(
         total_pages = result.total_pages.clamp(1, MAX_PAGES);
         total_found += result.mods.len();
 
+        let had_news = page_has_news(&result.mods, known);
+
         collected.extend(result.mods.into_iter().map(|m| ModCache {
             overtake_id: m.overtake_id,
             title: m.title,
@@ -234,6 +253,19 @@ async fn run_sync(
                 "mods_found": total_found
             }),
         );
+
+        // The listing is requested with `order=last_update&direction=desc`, so
+        // once a whole page holds nothing new and nothing re-dated, every page
+        // after it is older still. Walking the remaining ten pages would only
+        // re-read what is already cached — and hammer Overtake for nothing.
+        //
+        // Guarded by `deep` because this is the one place a wrong assumption
+        // would lose data silently rather than loudly: if the site ever stops
+        // honouring the sort, "Deep sync" is the way back.
+        if !deep && !had_news {
+            log::info!("sync: page {current_page} held nothing new, stopping early");
+            break;
+        }
 
         current_page += 1;
         if current_page > total_pages {
@@ -264,6 +296,21 @@ async fn run_sync(
     }
 
     Ok(total_found)
+}
+
+/// Whether a scraped page contains anything the cache does not already have.
+///
+/// "News" is either a mod we have never seen or one whose last-update date has
+/// moved. A page of entries that are all known *and* unchanged means the sync
+/// has caught up with itself.
+fn page_has_news(
+    mods: &[ScrapedMod],
+    known: &std::collections::HashMap<String, String>,
+) -> bool {
+    mods.iter().any(|m| match known.get(&m.overtake_id) {
+        Some(cached_date) => cached_date != &m.last_updated,
+        None => true,
+    })
 }
 
 /// Paginated search over the locally cached catalog.
@@ -317,4 +364,52 @@ pub fn search_mods(
     let take = limit.clamp(1, 200) as usize;
 
     Ok(matches.into_iter().skip(skip).take(take).cloned().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn scraped(id: &str, last_updated: &str) -> ScrapedMod {
+        ScrapedMod {
+            overtake_id: id.into(),
+            title: "x".into(),
+            url: "https://www.overtake.gg/downloads/x.1/".into(),
+            author: String::new(),
+            version: String::new(),
+            description: String::new(),
+            image_url: String::new(),
+            download_count: 0,
+            last_updated: last_updated.into(),
+        }
+    }
+
+    /// The stopping rule decides when a sync gives up walking pages, so a
+    /// mistake here does not fail loudly — it silently misses mods. Both
+    /// directions are pinned.
+    #[test]
+    fn a_page_of_known_unchanged_mods_is_where_a_sync_stops() {
+        let known = HashMap::from([
+            ("1".to_string(), "2026-08-01".to_string()),
+            ("2".to_string(), "2026-07-30".to_string()),
+        ]);
+
+        assert!(
+            !page_has_news(&[scraped("1", "2026-08-01"), scraped("2", "2026-07-30")], &known),
+            "everything already cached and unchanged"
+        );
+
+        assert!(
+            page_has_news(&[scraped("1", "2026-08-01"), scraped("3", "2026-06-01")], &known),
+            "an id we have never seen is news, even with an older date"
+        );
+
+        assert!(
+            page_has_news(&[scraped("1", "2026-08-09")], &known),
+            "a known mod with a moved date is news"
+        );
+
+        assert!(page_has_news(&[], &known) == false, "an empty page holds no news");
+    }
 }
