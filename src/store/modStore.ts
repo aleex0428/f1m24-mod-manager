@@ -26,6 +26,8 @@ interface ModStore {
   // ─── App state ───────────────────────────────────────────
   gamePath: string;
   gamePathValid: boolean;
+  /** True while F1Manager24.exe is running and the .pak files are locked. */
+  gameRunning: boolean;
   appVersion: string;
   isLoggedIn: boolean;
   notifications: AppNotification[];
@@ -50,6 +52,7 @@ interface ModStore {
 
   setGamePath: (path: string) => void;
   setGamePathValid: (valid: boolean) => void;
+  setGameRunning: (running: boolean) => void;
   setAppVersion: (v: string) => void;
   setLoggedIn: (v: boolean) => void;
 
@@ -72,6 +75,7 @@ export const useModStore = create<ModStore>((set) => ({
 
   gamePath: "",
   gamePathValid: false,
+  gameRunning: false,
   appVersion: "1.0.0",
   isLoggedIn: false,
   notifications: [],
@@ -151,6 +155,7 @@ export const useModStore = create<ModStore>((set) => ({
 
   setGamePath: (gamePath) => set({ gamePath }),
   setGamePathValid: (gamePathValid) => set({ gamePathValid }),
+  setGameRunning: (gameRunning) => set({ gameRunning }),
   setAppVersion: (appVersion) => set({ appVersion }),
   setLoggedIn: (isLoggedIn) => set({ isLoggedIn }),
 

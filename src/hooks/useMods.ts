@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import toast from "react-hot-toast";
 import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
-import type { ConflictInfo, Mod, UpdateAvailable } from "../types";
+import type { ConflictInfo, Mod, ModIntegrity, UpdateAvailable } from "../types";
 
 // ─── Raw shape returned by Rust (serde camelCase) ──────────
 interface RawMod {
@@ -23,6 +23,9 @@ interface RawMod {
   installedAt: string;
   sourceUrl: string | null;
   sizeBytes: number;
+  integrity: ModIntegrity;
+  notes: string | null;
+  favourite: boolean;
 }
 
 function parseMod(raw: RawMod): Mod {
@@ -44,6 +47,9 @@ function parseMod(raw: RawMod): Mod {
     installedAt: raw.installedAt,
     sourceUrl: raw.sourceUrl ?? undefined,
     sizeBytes: raw.sizeBytes ?? 0,
+    integrity: raw.integrity ?? "ok",
+    notes: raw.notes ?? undefined,
+    favourite: raw.favourite ?? false,
   };
 }
 

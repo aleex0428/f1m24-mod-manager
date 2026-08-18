@@ -37,6 +37,15 @@ tauri-plugin-updater = "2.10.1"
 tauri-plugin-window-state = "2.4.1"
 tauri-plugin-process = "2.3.1"
 
+# Diagnostics. A rotating log on disk is the only thing a user can send when
+# something fails; before this there was nothing to ask them for.
+tauri-plugin-log = "2"
+log = "0.4"
+
+# Process listing, to refuse touching ~mods while the game has the .pak files
+# open. Only the process list is needed, so every other probe is switched off.
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
 # Windows registry
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

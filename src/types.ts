@@ -1,5 +1,8 @@
 // ─── Shared TypeScript types ─────────────────────────────────
 
+/** Whether what the library claims is installed is actually on disk. */
+export type ModIntegrity = "ok" | "incomplete" | "missing" | "modified";
+
 export interface Mod {
   id: string;
   name: string;
@@ -19,6 +22,15 @@ export interface Mod {
   sourceUrl?: string;
   /** Bytes the mod's files take in ~mods, measured at listing time. */
   sizeBytes: number;
+  /**
+   * Presence on disk, recomputed on every listing. `modified` only ever
+   * arrives from an explicit verification, never from a plain load.
+   */
+  integrity: ModIntegrity;
+  /** The user's own note about this mod. */
+  notes?: string;
+  /** Pinned by the user. */
+  favourite: boolean;
 }
 
 /** How a mod fares against the others claiming its pakchunks. */

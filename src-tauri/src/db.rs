@@ -33,6 +33,20 @@ pub struct ModRecord {
     pub load_order: i32,
     pub installed_at: String,
     pub source_url: Option<String>,
+
+    // ── Added in 1.1.0 ──────────────────────────────────────────
+    //
+    // `serde(default)` is not optional here. Every field added to this struct
+    // must have one, because `mods.json` written by an older build has no such
+    // key — and a failed parse is not a small thing: `DbStore` renames an
+    // unreadable library to `mods.corrupt.json` and starts empty. Without these
+    // attributes, updating the app would look exactly like losing your library.
+    /// The user's own note about this mod.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Pinned by the user, for the handful they actually care about.
+    #[serde(default)]
+    pub favourite: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -184,6 +198,34 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("f1m24-db-test-{name}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_pre_1_1_mod_record_still_parses() {
+        // Byte for byte the shape 1.0.x wrote: no `notes`, no `favourite`.
+        // If this ever fails, upgrading the app wipes people's libraries.
+        let legacy = r#"{
+          "id": "abc",
+          "name": "F1 Elite",
+          "author": "Chase Chance",
+          "version": "1.1.2",
+          "description": null,
+          "imageUrl": null,
+          "tags": [],
+          "parentModId": null,
+          "installedFilenames": ["pakchunk99-WindowsNoEditor.pak"],
+          "pakchunks": [99],
+          "checksum": "deadbeef",
+          "enabled": true,
+          "loadOrder": 0,
+          "installedAt": "2026-08-11T00:00:00Z",
+          "sourceUrl": null
+        }"#;
+
+        let record: ModRecord = serde_json::from_str(legacy).expect("old records must still load");
+        assert_eq!(record.name, "F1 Elite");
+        assert_eq!(record.notes, None);
+        assert!(!record.favourite);
     }
 
     fn legacy_file() -> String {

@@ -195,6 +195,17 @@ export function CommandPalette({
         },
       },
       {
+        id: "act-verify",
+        group: "Actions",
+        label: "Verify installed files",
+        icon: "check-circle",
+        keywords: "integrity checksum broken missing corrupt",
+        perform: () => {
+          navigate("/library");
+          dispatch("app:verify-files");
+        },
+      },
+      {
         id: "act-folder",
         group: "Actions",
         label: "Open the ~mods folder",

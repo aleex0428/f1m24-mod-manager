@@ -1,6 +1,7 @@
 import { memo, useState, type MouseEvent } from "react";
 import { Icon } from "./Icon";
 import { ModCover } from "./ModCover";
+import { IntegrityBadge } from "./IntegrityBadge";
 import { ModDetailsModal } from "./ModDetailsModal";
 import { formatBytes } from "../lib/format";
 import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
@@ -133,6 +134,12 @@ function ModTileBase({
             {mod.author ? `by ${mod.author}` : mod.sourceUrl ? "Overtake.gg" : "Local file"}
             {mod.sizeBytes > 0 && ` · ${formatBytes(mod.sizeBytes)}`}
           </p>
+
+          {mod.integrity !== "ok" && (
+            <span className="flex">
+              <IntegrityBadge integrity={mod.integrity} />
+            </span>
+          )}
 
           {overriddenBy && (
             <p className="truncate text-2xs text-warning" title={`Overridden by ${overriddenBy}`}>

@@ -30,6 +30,7 @@ import { LibrarySummary } from "../components/LibrarySummary";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { Icon } from "../components/Icon";
 import { useContextMenu, type MenuAction } from "../components/ContextMenu";
+import { useModStore } from "../store/modStore";
 import { useMods } from "../hooks/useMods";
 import { usePreference } from "../hooks/usePreference";
 import { installLocalFile } from "../lib/install";
@@ -37,7 +38,15 @@ import { uninstallMod, uninstallMods } from "../lib/modActions";
 import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
 
 /** Which slice of the library is on screen. */
-export type LibraryFilter = "all" | "active" | "disabled" | "conflict" | "update" | "local";
+export type LibraryFilter =
+  | "all"
+  | "active"
+  | "disabled"
+  | "conflict"
+  | "update"
+  | "local"
+  | "broken"
+  | "favourite";
 
 const FILTER_LABELS: Record<LibraryFilter, string> = {
   all: "All",
@@ -46,6 +55,8 @@ const FILTER_LABELS: Record<LibraryFilter, string> = {
   conflict: "Conflicting",
   update: "Updatable",
   local: "Local files",
+  broken: "Needs attention",
+  favourite: "Favourites",
 };
 
 export function Library() {
@@ -71,6 +82,11 @@ export function Library() {
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+
+  // Every write into ~mods is refused while the game holds the .pak files
+  // open, so the controls that write are disabled rather than left to fail.
+  const gameRunning = useModStore((s) => s.gameRunning);
+  const lockedHint = gameRunning ? "Close F1 Manager 24 first — its mod files are locked" : undefined;
 
   const [viewMode, setViewMode] = usePreference<"list" | "grid">("library-view", "list");
   const [density, setDensity] = usePreference<"comfortable" | "compact">(
@@ -141,6 +157,10 @@ export function Library() {
           return updatesByMod.has(mod.id);
         case "local":
           return !mod.sourceUrl;
+        case "broken":
+          return mod.integrity !== "ok";
+        case "favourite":
+          return mod.favourite;
         default:
           return true;
       }
@@ -161,6 +181,8 @@ export function Library() {
       conflict: standingByMod.size,
       update: updates.length,
       local: mods.filter((m) => !m.sourceUrl).length,
+      broken: mods.filter((m) => m.integrity !== "ok").length,
+      favourite: mods.filter((m) => m.favourite).length,
     }),
     [mods, enabledCount, standingByMod, updates]
   );
@@ -215,22 +237,53 @@ export function Library() {
     setCheckingUpdates(false);
   }, [checkForUpdates]);
 
+  /**
+   * Re-hash everything and mark what no longer matches.
+   *
+   * Reads every .pak from end to end, so it is never run automatically — the
+   * presence check that runs on every load is the cheap half, and this is the
+   * half the user asks for.
+   */
+  const handleVerify = useCallback(async () => {
+    const toastId = toast.loading("Verifying installed files…");
+    try {
+      const changed = await invoke<string[]>("verify_mods");
+      const store = useModStore.getState();
+      for (const id of changed) store.updateMod(id, { integrity: "modified" });
+
+      if (changed.length === 0) {
+        toast.success("Every mod matches what was installed", { id: toastId });
+      } else {
+        toast.error(
+          `${changed.length} mod${changed.length === 1 ? "" : "s"} no longer match what was installed`,
+          { id: toastId }
+        );
+        setFilter("broken");
+      }
+    } catch (err) {
+      toast.error(String(err), { id: toastId });
+    }
+  }, []);
+
   // Commands from the palette land here, so there is one implementation of
   // each action rather than one per entry point.
   useEffect(() => {
     const focus = () => filterRef.current?.select();
     const install = () => handleInstallFile();
     const check = () => handleCheckUpdates();
+    const verify = () => handleVerify();
 
     window.addEventListener("app:focus-search", focus);
     window.addEventListener("app:install-file", install);
     window.addEventListener("app:check-updates", check);
+    window.addEventListener("app:verify-files", verify);
     return () => {
       window.removeEventListener("app:focus-search", focus);
       window.removeEventListener("app:install-file", install);
       window.removeEventListener("app:check-updates", check);
+      window.removeEventListener("app:verify-files", verify);
     };
-  }, [handleInstallFile, handleCheckUpdates]);
+  }, [handleInstallFile, handleCheckUpdates, handleVerify]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -617,12 +670,26 @@ export function Library() {
             </>
           )}
 
+          <button
+            onClick={handleVerify}
+            className="btn-ghost !py-2"
+            title="Re-read every installed file and check it still matches"
+          >
+            <Icon name="check-circle" size={16} />
+            Verify
+          </button>
+
           <button onClick={handleOpenFolder} className="btn-ghost !py-2" title="Open the ~mods folder">
             <Icon name="folder" size={16} />
             Folder
           </button>
 
-          <button onClick={handleInstallFile} disabled={installing} className="btn-primary !py-2">
+          <button
+            onClick={handleInstallFile}
+            disabled={installing || gameRunning}
+            title={lockedHint}
+            className="btn-primary !py-2"
+          >
             <Icon name="plus" size={16} strokeWidth={2} />
             Install file
           </button>
@@ -665,19 +732,41 @@ export function Library() {
           <span className="ml-auto flex items-center gap-1">
             <button
               onClick={() => handleSetAll(true)}
+              disabled={gameRunning}
               className="btn-subtle !py-1.5 !text-xs"
-              title="Enable every installed mod"
+              title={lockedHint ?? "Enable every installed mod"}
             >
               Enable all
             </button>
             <button
               onClick={() => handleSetAll(false)}
+              disabled={gameRunning}
               className="btn-subtle !py-1.5 !text-xs"
-              title="Disable every installed mod — handy before a game update"
+              title={lockedHint ?? "Disable every installed mod — handy before a game update"}
             >
               Disable all
             </button>
           </span>
+        </div>
+      )}
+
+      {/* The library and the disk disagree. Worth interrupting for: a mod
+          listed as active whose files are gone is a mod the user believes is
+          working. */}
+      {filterCounts.broken > 0 && filter !== "broken" && (
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2.5">
+          <Icon name="warning-solid" size={16} className="text-danger" />
+          <span className="flex-1 text-xs text-danger">
+            {filterCounts.broken} mod{filterCounts.broken === 1 ? "" : "s"} no longer
+            {filterCounts.broken === 1 ? " has" : " have"} all their files in the game folder — a
+            game update or a manual clean-up removes them.
+          </span>
+          <button
+            onClick={() => setFilter("broken")}
+            className="btn-ghost !py-1.5 !text-xs border-danger/30 text-danger"
+          >
+            Show them
+          </button>
         </div>
       )}
 
@@ -697,7 +786,12 @@ export function Library() {
             >
               Discard
             </button>
-            <button onClick={handleApplyOrder} className="btn-primary !py-1.5 !text-xs">
+            <button
+              onClick={handleApplyOrder}
+              disabled={gameRunning}
+              title={lockedHint}
+              className="btn-primary !py-1.5 !text-xs"
+            >
               Apply order
             </button>
           </div>

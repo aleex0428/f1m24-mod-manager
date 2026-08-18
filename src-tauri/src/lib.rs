@@ -4,6 +4,7 @@
 
 mod auth;
 mod db;
+mod diagnostics;
 mod downloader;
 mod game_detector;
 mod launcher;
@@ -93,6 +94,23 @@ fn quit_app(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            // File and stdout only. The webview target is deliberately absent:
+            // it would capture console output from the ghost webview, which is
+            // where the Overtake session lives — a log meant to be pasted in
+            // public must never be able to carry a cookie.
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .max_file_size(2 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("f1m24".into()) },
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .build(),
+        )
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -116,6 +134,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            diagnostics::log_startup(app.handle());
+
             // Leftover archives from a previous run are dead weight on disk.
             let temp_dir = downloader::downloads_temp_root();
             if temp_dir.exists() {
@@ -400,6 +420,14 @@ pub fn run() {
             mod_manager::set_all_mods_enabled,
             mod_manager::delete_mod,
             mod_manager::restore_mod,
+            mod_manager::verify_mods,
+            mod_manager::set_mod_notes,
+            mod_manager::set_mod_favourite,
+            // Diagnostics
+            diagnostics::open_log_folder,
+            diagnostics::collect_diagnostics,
+            diagnostics::get_log_dir,
+            game_detector::game_is_running,
             mod_manager::detect_conflicts,
             mod_manager::apply_load_order,
             mod_manager::open_mods_folder,

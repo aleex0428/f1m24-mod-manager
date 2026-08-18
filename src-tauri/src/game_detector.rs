@@ -329,6 +329,92 @@ pub fn is_valid_game_path(game_path: &str) -> bool {
     !path.is_empty() && PathBuf::from(path).join(GAME_EXE).exists()
 }
 
+// ─── Is the game holding our files open? ─────────────────────────
+//
+// Everything this app does to `~mods` is a rename, a move or a delete of a
+// `.pak` the game memory-maps while it runs. Windows refuses those on an open
+// file, so a toggle attempted mid-session fails *partway*: some files in a
+// group are renamed and some are not, which is the one state the naming scheme
+// cannot describe. The library then disagrees with the disk and the mod is
+// half-applied in game.
+//
+// So it is refused up front, with an explanation, instead of being attempted
+// and half-failing.
+
+/// How long a process-list answer is reused.
+///
+/// Enumerating every process costs tens of milliseconds, and
+/// `set_all_mods_enabled` calls `toggle_mod` once per mod — sixty mods would
+/// otherwise mean sixty full scans and a visibly frozen window. Short enough
+/// that closing the game feels immediate, long enough that a batch operation
+/// pays for one scan rather than one per item.
+const RUNNING_CACHE_MS: u128 = 1_500;
+
+static RUNNING_CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
+    std::sync::Mutex::new(None);
+
+/// True while F1 Manager 24 is running.
+///
+/// Matched on the exact executable name — a `contains` would also catch an
+/// unrelated process that merely mentions it, and locking the user out of
+/// their own mod folder over a false positive is worse than the race this
+/// prevents.
+///
+/// Best-effort by nature: the game could start in the moment between this
+/// answer and the rename that follows it. The point is to catch the ordinary
+/// case — the user simply forgot the game was open — not to make the race
+/// impossible.
+pub fn is_game_running() -> bool {
+    if let Ok(cache) = RUNNING_CACHE.lock() {
+        if let Some((at, value)) = *cache {
+            if at.elapsed().as_millis() < RUNNING_CACHE_MS {
+                return value;
+            }
+        }
+    }
+
+    let running = scan_for_game();
+
+    if let Ok(mut cache) = RUNNING_CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), running));
+    }
+    running
+}
+
+fn scan_for_game() -> bool {
+    use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+
+    let system = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+    );
+
+    system
+        .processes()
+        .values()
+        .any(|p| p.name().eq_ignore_ascii_case(GAME_EXE))
+}
+
+/// Guard for every command that writes into `~mods`.
+///
+/// One helper rather than a check per command, so a new mod-touching command
+/// cannot forget it — and so the wording the user sees is identical wherever
+/// they hit it.
+pub fn ensure_game_closed() -> Result<(), String> {
+    if is_game_running() {
+        return Err(
+            "F1 Manager 24 is running. Close the game first — its mod files are locked while it is open."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Lets the UI grey out the controls instead of letting them fail.
+#[tauri::command]
+pub fn game_is_running() -> bool {
+    is_game_running()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

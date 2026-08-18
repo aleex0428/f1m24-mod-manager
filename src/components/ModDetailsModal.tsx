@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { BackgroundBlur } from "./BackgroundBlur";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
 import { ModCover } from "./ModCover";
+import { setModFavourite, setModNotes } from "../lib/modActions";
 import { formatBytes, formatDate } from "../lib/format";
 import type { Mod, UpdateAvailable } from "../types";
 
@@ -26,6 +28,22 @@ export function ModDetailsModal({
   onUpdate,
 }: ModDetailsModalProps) {
   const cover = mod.imageUrl || mod.thumbnailUrl;
+
+  // Notes are held locally while typing and written when the field loses
+  // focus. Saving on every keystroke would rewrite mods.json per character.
+  const [draft, setDraft] = useState(mod.notes ?? "");
+  const saved = useRef(mod.notes ?? "");
+
+  useEffect(() => {
+    setDraft(mod.notes ?? "");
+    saved.current = mod.notes ?? "";
+  }, [mod.id, mod.notes]);
+
+  const commitNotes = () => {
+    if (draft === saved.current) return;
+    saved.current = draft;
+    setModNotes(mod.id, draft);
+  };
 
   return (
     <Modal
@@ -77,6 +95,19 @@ export function ModDetailsModal({
           <span className="chip border-border bg-surface-raised text-text-secondary">
             slot {mod.loadOrder + 1}
           </span>
+
+          <button
+            onClick={() => setModFavourite(mod.id, !mod.favourite)}
+            aria-pressed={mod.favourite}
+            className={`chip transition-colors ${
+              mod.favourite
+                ? "border-warning/30 bg-warning/10 text-warning"
+                : "border-border bg-surface-raised text-text-muted hover:text-text-secondary"
+            }`}
+          >
+            <Icon name={mod.favourite ? "star-solid" : "star"} size={12} />
+            {mod.favourite ? "Favourite" : "Add to favourites"}
+          </button>
         </div>
 
         {mod.description && (
@@ -94,6 +125,21 @@ export function ModDetailsModal({
           />
           <Detail label="Checksum" value={mod.checksum ? `${mod.checksum.slice(0, 12)}…` : "—"} mono />
         </dl>
+
+        <div className="mt-6">
+          <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+            Your notes
+          </h3>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitNotes}
+            rows={3}
+            placeholder="Why is this disabled? What did it clash with? Anything you will want to remember."
+            aria-label="Your notes about this mod"
+            className="input resize-y !py-2 text-sm"
+          />
+        </div>
 
         <div className="mt-6">
           <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">

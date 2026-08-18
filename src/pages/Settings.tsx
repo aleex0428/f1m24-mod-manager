@@ -40,6 +40,7 @@ export function Settings() {
   const [modsPath, setModsPath] = useState("");
   const [releasesUrl, setReleasesUrl] = useState("");
   const [archivesPath, setArchivesPath] = useState("");
+  const [logPath, setLogPath] = useState("");
   const [activeSection, setActiveSection] = useState(SECTIONS[0].id);
   const [tailSpace, setTailSpace] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -53,6 +54,7 @@ export function Settings() {
     invoke<CatalogStats>("get_catalog_stats").then(setStats).catch(() => {});
     invoke<string>("get_archives_path").then(setArchivesPath).catch(() => {});
     invoke<string>("get_releases_url").then(setReleasesUrl).catch(() => {});
+    invoke<string>("get_log_dir").then(setLogPath).catch(() => {});
 
     invoke<string>("get_setting", { key: PREF_CLOSE_TO_TRAY })
       .then((v) => setCloseToTray(v !== "false"))
@@ -205,6 +207,29 @@ export function Settings() {
       await invoke("open_archives_folder");
     } catch (err) {
       toast.error(String(err));
+    }
+  }, []);
+
+  const handleOpenLogs = useCallback(async () => {
+    try {
+      await invoke("open_log_folder");
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }, []);
+
+  /**
+   * Put the report on the clipboard rather than opening a dialog: it exists to
+   * be pasted into a forum post or a bug report, and every extra step between
+   * "something broke" and "here is my setup" is a report that never arrives.
+   */
+  const handleCopyDiagnostics = useCallback(async () => {
+    try {
+      const report = await invoke<string>("collect_diagnostics");
+      await navigator.clipboard.writeText(report);
+      toast.success("Diagnostics copied — paste them into your report");
+    } catch (err) {
+      toast.error(`Could not collect diagnostics: ${err}`);
     }
   }, []);
 
@@ -504,6 +529,25 @@ export function Settings() {
                   </div>
                 </div>
               )}
+
+              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border-subtle pt-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-2xs uppercase tracking-wider text-text-muted">
+                    Diagnostics
+                  </p>
+                  <p className="truncate font-mono text-xs text-text-secondary" title={logPath}>
+                    {logPath || "—"}
+                  </p>
+                </div>
+                <button onClick={handleCopyDiagnostics} className="btn-ghost !py-2 !text-xs">
+                  <Icon name="check" size={14} />
+                  Copy diagnostics
+                </button>
+                <button onClick={handleOpenLogs} className="btn-ghost !py-2 !text-xs">
+                  <Icon name="folder" size={14} />
+                  Open logs
+                </button>
+              </div>
 
               {update.stage === "error" && (
                 <div className="mt-3 rounded-xl border border-danger/25 bg-danger/10 p-3">

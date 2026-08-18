@@ -105,6 +105,26 @@ struct ModFile {
 
 // ─── Commands ────────────────────────────────────────────────────
 
+/// Whether what the library claims is installed is actually on disk.
+///
+/// The library is a record of what *was* installed; the game folder is edited
+/// by game updates, by anti-cheat sweeps and by hand. Until now the two were
+/// never compared, so a `~mods` emptied by a patch left every mod still listed
+/// as present and enabled.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModIntegrity {
+    /// Every file the record names is where it should be.
+    Ok,
+    /// Some of the mod's files are there and some are not.
+    Incomplete,
+    /// None of them are.
+    Missing,
+    /// Present, but the bytes no longer hash to what was installed. Only ever
+    /// produced by `verify_mods`, never by a plain listing.
+    Modified,
+}
+
 /// A mod as the UI sees it: the stored record plus what it weighs right now.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +134,9 @@ pub struct ModView {
     /// Measured on every listing rather than stored: files are renamed on the
     /// disk as the load order changes, and a stale number is worse than none.
     pub size_bytes: u64,
+    /// Presence check only — cheap, because it reads the directory listing the
+    /// size calculation already needs. Checksums are `verify_mods`' job.
+    pub integrity: ModIntegrity,
 }
 
 /// Return all installed mods.
@@ -136,15 +159,74 @@ pub fn get_mods(state: State<AppState>) -> Result<Vec<ModView>, String> {
     Ok(mods
         .into_iter()
         .map(|record| {
-            let size_bytes = record
+            let bases: Vec<String> = record
                 .installed_filenames
                 .iter()
                 .filter_map(|name| base_of(name))
-                .filter_map(|base| sizes.get(&base).copied())
+                .collect();
+
+            let present = bases.iter().filter(|base| sizes.contains_key(*base)).count();
+            let size_bytes = bases
+                .iter()
+                .filter_map(|base| sizes.get(base).copied())
                 .sum();
-            ModView { record, size_bytes }
+
+            let integrity =
+                integrity_from_presence(present, bases.len(), !game_path.trim().is_empty());
+
+            ModView { record, size_bytes, integrity }
         })
         .collect())
+}
+
+/// Re-hash installed mods and report the ones whose bytes have changed.
+///
+/// Separate from `get_mods` on purpose: this reads every `.pak` from end to
+/// end — hundreds of megabytes — and doing that on every library load would
+/// make the app feel broken. Presence is checked constantly because it is
+/// nearly free; content is checked when the user asks.
+///
+/// Returns the ids of mods that no longer match what was installed.
+#[tauri::command]
+pub fn verify_mods(state: State<AppState>) -> Result<Vec<String>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let game_path = conn
+        .get_setting("game_path")
+        .filter(|p| !p.trim().is_empty())
+        .ok_or("Game path is not configured")?;
+
+    let on_disk = read_mod_files(&get_mods_dir(&game_path));
+    let mut changed = Vec::new();
+
+    for record in conn.data.mods.values() {
+        // The checksum was taken from the first .pak at install time. Load
+        // order renames add a _NNN_P suffix, so the file is found by base
+        // rather than by name — the content is what is being checked.
+        let Some(base) = record.installed_filenames.first().and_then(|n| base_of(n)) else {
+            continue;
+        };
+        if record.checksum.is_empty() {
+            continue; // installed before checksums were recorded
+        }
+
+        let Some(file) = on_disk
+            .iter()
+            .find(|f| f.base == base && f.ext == "pak")
+        else {
+            continue; // absent, which `get_mods` already reports
+        };
+
+        match sha256_file(&file.path) {
+            Ok(hash) if hash != record.checksum => {
+                log::info!("integrity: {} no longer matches its install", record.name);
+                changed.push(record.id.clone());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(changed)
 }
 
 /// Enable or disable every installed mod at once.
@@ -153,6 +235,8 @@ pub fn get_mods(state: State<AppState>) -> Result<Vec<ModView>, String> {
 /// each; this is a single pass.
 #[tauri::command]
 pub fn set_all_mods_enabled(enabled: bool, state: State<AppState>) -> Result<usize, String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let ids: Vec<String> = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         conn.data
@@ -180,6 +264,8 @@ pub async fn install_mod(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<InstallOutcome, String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let game_path = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         conn.get_setting("game_path")
@@ -347,6 +433,23 @@ fn install_groups(
 ) -> Result<String, String> {
     let replaced_mod_id = replaced.as_ref().map(|(id, _)| id.clone());
 
+    // What the user wrote about this mod belongs to the mod, not to the
+    // version of it that happens to be installed. Updating a mod must not
+    // silently throw away a note explaining why it is disabled.
+    //
+    // Read in its own scope: `delete_mod` takes the same lock.
+    let (carried_notes, carried_favourite) = {
+        match &replaced_mod_id {
+            Some(old_id) => state
+                .db
+                .lock()
+                .ok()
+                .and_then(|conn| conn.data.mods.get(old_id).map(|m| (m.notes.clone(), m.favourite)))
+                .unwrap_or((None, false)),
+            None => (None, false),
+        }
+    };
+
     // The new files are valid — now it is safe to retire the old version.
     if let Some(old_id) = &replaced_mod_id {
         // Not undoable: the replacement is already on disk, so the old files
@@ -439,6 +542,8 @@ fn install_groups(
             load_order,
             installed_at: Utc::now().to_rfc3339(),
             source_url,
+            notes: carried_notes,
+            favourite: carried_favourite,
         };
 
         conn.data.mods.insert(mod_id.clone(), record);
@@ -660,6 +765,8 @@ pub fn resolve_install_variant(
     state: State<AppState>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let pending = {
         let mut map = state
             .pending_installs
@@ -767,6 +874,8 @@ fn cleanup_pending(pending: &PendingInstall) {
 /// Toggle a mod on or off by adding/removing the `.disabled` marker.
 #[tauri::command]
 pub fn toggle_mod(mod_id: String, enabled: bool, state: State<AppState>) -> Result<(), String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
 
     let game_path = conn
@@ -830,6 +939,8 @@ pub fn delete_mod(
     undoable: Option<bool>,
     state: State<AppState>,
 ) -> Result<(), String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
     let game_path = conn.get_setting("game_path").unwrap_or_default();
 
@@ -878,6 +989,8 @@ pub fn delete_mod(
 /// renumbering the whole folder would be a second surprise.
 #[tauri::command]
 pub fn restore_mod(mod_id: String, state: State<AppState>) -> Result<(), String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
     let game_path = conn
         .get_setting("game_path")
@@ -926,6 +1039,43 @@ fn trash_dir(active_dir: &Path, mod_id: &str) -> PathBuf {
     active_dir.join(TRASH_ROOT).join(mod_id)
 }
 
+/// Save the user's note for a mod.
+///
+/// No game-closed guard: this touches only `mods.json`, never a file the game
+/// has open. The guard exists for operations that rename `.pak` files, and
+/// applying it here would block note-taking for no reason at all.
+#[tauri::command]
+pub fn set_mod_notes(mod_id: String, notes: String, state: State<AppState>) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    let record = conn
+        .data
+        .mods
+        .get_mut(&mod_id)
+        .ok_or("That mod is no longer installed")?;
+
+    let trimmed = notes.trim();
+    record.notes = (!trimmed.is_empty()).then(|| trimmed.to_string());
+    conn.save()
+}
+
+/// Pin or unpin a mod.
+#[tauri::command]
+pub fn set_mod_favourite(
+    mod_id: String,
+    favourite: bool,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    let record = conn
+        .data
+        .mods
+        .get_mut(&mod_id)
+        .ok_or("That mod is no longer installed")?;
+
+    record.favourite = favourite;
+    conn.save()
+}
+
 /// Detect conflicts between enabled mods sharing the same pakchunk.
 #[tauri::command]
 pub fn detect_conflicts(state: State<AppState>) -> Result<Vec<ConflictInfo>, String> {
@@ -960,6 +1110,8 @@ pub fn detect_conflicts(state: State<AppState>) -> Result<Vec<ConflictInfo>, Str
 /// The first mod in the list wins conflicts, so it gets the highest priority.
 #[tauri::command]
 pub fn apply_load_order(ordered_mod_ids: Vec<String>, state: State<AppState>) -> Result<(), String> {
+    crate::game_detector::ensure_game_closed()?;
+
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
 
     let game_path = conn
@@ -1107,6 +1259,25 @@ fn read_mod_files(dir: &Path) -> Vec<ModFile> {
         .collect()
 }
 
+/// Turn "how many of this mod's file groups are on disk" into a verdict.
+///
+/// Pure, and tested, because the interesting cases are the ones that must
+/// *not* raise an alarm: with no game folder configured there is nothing to
+/// compare against, and a record that names no files cannot be missing them.
+/// Getting either wrong would paint a healthy library red.
+fn integrity_from_presence(present: usize, expected: usize, has_game_path: bool) -> ModIntegrity {
+    if !has_game_path || expected == 0 {
+        return ModIntegrity::Ok;
+    }
+    if present == 0 {
+        return ModIntegrity::Missing;
+    }
+    if present < expected {
+        return ModIntegrity::Incomplete;
+    }
+    ModIntegrity::Ok
+}
+
 fn base_exists_in(dir: &Path, base: &str) -> bool {
     read_mod_files(dir).iter().any(|f| f.base == base)
 }
@@ -1172,6 +1343,18 @@ mod tests {
     #[test]
     fn reads_pakchunk_numbers() {
         assert_eq!(extract_pakchunks(&["pakchunk42-WindowsNoEditor.pak".into()]), vec![42]);
+    }
+
+    #[test]
+    fn integrity_only_alarms_when_it_can_actually_tell() {
+        // Nothing configured: silence, not a library painted red.
+        assert_eq!(integrity_from_presence(0, 3, false), ModIntegrity::Ok);
+        // A record naming no files cannot be missing any.
+        assert_eq!(integrity_from_presence(0, 0, true), ModIntegrity::Ok);
+
+        assert_eq!(integrity_from_presence(0, 3, true), ModIntegrity::Missing);
+        assert_eq!(integrity_from_presence(1, 3, true), ModIntegrity::Incomplete);
+        assert_eq!(integrity_from_presence(3, 3, true), ModIntegrity::Ok);
     }
 
     /// The undo bin lives inside `~mods`, so the thing that must never happen

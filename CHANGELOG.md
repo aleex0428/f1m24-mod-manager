@@ -2,7 +2,34 @@
 
 All notable changes to F1M24 Mod Manager are documented here.
 
-## [1.0.1] — unreleased
+## [1.1.0] — unreleased
+
+### Added
+
+- **Notes and favourites.** Write yourself a note on any mod — why it is
+  disabled, what it clashed with — and pin the ones you care about. Both
+  survive updating the mod, because a note belongs to the mod rather than to
+  the version of it you happen to have installed.
+
+### Improved
+
+### Fixed
+
+- **The app no longer lets you break your own install while the game runs.**
+  Every mod operation renames files the game keeps open, so a toggle attempted
+  mid-session used to fail halfway, leaving the library and the game folder
+  disagreeing. Installing, enabling, reordering and uninstalling are now paused
+  with an explanation while F1 Manager 24 is open.
+- **Mods that are no longer on disk are marked as such.** The library recorded
+  what was installed and never looked again, so a `~mods` folder emptied by a
+  game update left every mod still listed as present and active. Missing and
+  incomplete mods are now flagged on every load, and a **Verify** button
+  re-reads the files to catch ones that have been modified since.
+- **There is something to send when it goes wrong.** The app writes a log, and
+  Settings has a button that copies a summary of your setup for a bug report.
+  Neither ever contains your Overtake session.
+
+## [1.0.1] — 2026-08-16
 
 ### Added
 

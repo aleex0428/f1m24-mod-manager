@@ -2,8 +2,10 @@ import { memo, useState, type MouseEvent } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ConflictBadge } from "./ConflictBadge";
+import { IntegrityBadge } from "./IntegrityBadge";
 import { ModDetailsModal } from "./ModDetailsModal";
 import { Icon } from "./Icon";
+import { setModFavourite } from "../lib/modActions";
 import { ModCover } from "./ModCover";
 import { formatBytes, formatDate } from "../lib/format";
 import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
@@ -114,6 +116,22 @@ function ModCardBase({
           />
         </label>
 
+        {/* Favourite. Sits before the drag handle so the pinned ones are
+            scannable down a single column. */}
+        <button
+          onClick={() => setModFavourite(mod.id, !mod.favourite)}
+          className={`flex flex-shrink-0 items-center px-1 transition-colors ${
+            mod.favourite
+              ? "text-warning"
+              : "text-text-muted/40 opacity-0 hover:text-warning group-hover:opacity-100 focus-visible:opacity-100"
+          }`}
+          title={mod.favourite ? "Remove from favourites" : "Mark as favourite"}
+          aria-pressed={mod.favourite}
+          aria-label={`${mod.favourite ? "Unpin" : "Pin"} ${mod.name}`}
+        >
+          <Icon name={mod.favourite ? "star-solid" : "star"} size={15} />
+        </button>
+
         {/* Drag handle */}
         <button
           {...attributes}
@@ -208,6 +226,7 @@ function ModCardBase({
                 Update {update.newVersion}
               </span>
             )}
+            <IntegrityBadge integrity={mod.integrity} />
             {contested.length > 0 &&
               (overriddenBy ? (
                 <ConflictBadge chunks={contested} overriddenBy={overriddenBy} />

@@ -132,6 +132,30 @@ export async function uninstallMods(
   );
 }
 
+/** Pin or unpin a mod, optimistically. */
+export async function setModFavourite(modId: string, favourite: boolean): Promise<void> {
+  const store = useModStore.getState();
+  store.updateMod(modId, { favourite });
+  try {
+    await invoke("set_mod_favourite", { modId, favourite });
+  } catch (err) {
+    useModStore.getState().updateMod(modId, { favourite: !favourite });
+    toast.error(String(err));
+  }
+}
+
+/** Save the user's note for a mod. */
+export async function setModNotes(modId: string, notes: string): Promise<void> {
+  const previous = useModStore.getState().mods.find((m) => m.id === modId)?.notes;
+  useModStore.getState().updateMod(modId, { notes: notes.trim() || undefined });
+  try {
+    await invoke("set_mod_notes", { modId, notes });
+  } catch (err) {
+    useModStore.getState().updateMod(modId, { notes: previous });
+    toast.error(String(err));
+  }
+}
+
 /** Enable or disable one mod, optimistically, sharing the store's rollback. */
 export async function setModEnabled(modId: string, enabled: boolean): Promise<void> {
   const store = useModStore.getState();

@@ -40,6 +40,9 @@ import { useMods } from "./hooks/useMods";
 import { useDownload } from "./hooks/useDownload";
 import { selectActiveJobCount } from "./store/modStore";
 
+/** How often to re-check whether the game is running, while focused. */
+const GAME_POLL_MS = 4000;
+
 /** True when the keystroke landed in a field the user is typing into. */
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -60,6 +63,7 @@ function AppShell() {
   const location = useLocation();
   const activeJobCount = useModStore(selectActiveJobCount);
   const gamePathValid = useModStore((s) => s.gamePathValid);
+  const gameRunning = useModStore((s) => s.gameRunning);
   const { conflicts, loadMods } = useMods();
 
   useDownload();
@@ -180,6 +184,47 @@ function AppShell() {
       });
   }, [activeJobCount]);
 
+  // Watch for the game being open.
+  //
+  // Every mod operation renames a .pak the game memory-maps while it runs, so
+  // the backend refuses them outright; this is what lets the interface say so
+  // beforehand instead of surfacing a failure. Polled rather than pushed
+  // because nothing notifies us when a process starts, and only while the
+  // window is focused — there is nothing to warn about behind another window,
+  // and it keeps the scan off the CPU during a race.
+  useEffect(() => {
+    let disposed = false;
+
+    const check = () => {
+      invoke<boolean>("game_is_running")
+        .then((running) => {
+          if (!disposed) useModStore.getState().setGameRunning(running);
+        })
+        .catch(() => {
+          // No Tauri runtime: the guard simply does not apply.
+        });
+    };
+
+    check();
+    let timer = window.setInterval(check, GAME_POLL_MS);
+
+    const onFocus = () => {
+      check();
+      window.clearInterval(timer);
+      timer = window.setInterval(check, GAME_POLL_MS);
+    };
+    const onBlur = () => window.clearInterval(timer);
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   // ─── Keyboard shortcuts ─────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -289,6 +334,14 @@ function AppShell() {
             <WindowControls />
           </div>
         </header>
+
+        {gameRunning && (
+          <div className="flex flex-shrink-0 items-center gap-2 border-b border-info/20 bg-info/10 px-5 py-2 text-xs text-info">
+            <Icon name="warning" size={16} />
+            F1 Manager 24 is running — installing, enabling and reordering are paused until you
+            close it, because the game keeps its mod files locked.
+          </div>
+        )}
 
         {!gamePathValid && (
           <NavLink
