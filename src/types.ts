@@ -79,6 +79,10 @@ export interface Mod {
 /** How a mod fares against the others claiming its pakchunks. */
 export interface ConflictStanding {
   chunks: number[];
+  /** Files this mod shares with another, when the containers could be read. */
+  files?: string[];
+  /** False when the clash is inferred from pakchunks rather than measured. */
+  certain?: boolean;
   /** Name of the mod that overrides this one, when it loses. */
   overriddenBy?: string;
   /**
@@ -99,9 +103,14 @@ export interface UpdateAvailable {
 }
 
 export interface ConflictInfo {
+  /** `-1` when the clash is between mods that share no pakchunk. */
   pakchunk: number;
   mods: string[]; // mod ids
   modNames: string[]; // mod names
+  /** The files both mods replace. Empty when `certain` is false. */
+  files: string[];
+  /** True when this came from reading the containers, not from chunk numbers. */
+  certain: boolean;
 }
 
 export interface CatalogMod {

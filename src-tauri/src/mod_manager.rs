@@ -45,12 +45,28 @@ const VARIANT_PAK: &str = "pak:";
 
 // ─── Data types ──────────────────────────────────────────────────
 
+/// Two or more enabled mods fighting over the same thing.
+///
+/// `pakchunk` used to be the whole story, which made it a proxy rather than an
+/// answer: two mods on chunk 99 may touch different files, and two mods on
+/// different chunks may replace the same asset. `files` is the real evidence
+/// when the containers can be read; `certain` says which of the two you are
+/// looking at, so an estimate is never dressed up as a fact.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictInfo {
+    /// The chunk the clash was found under. `-1` for a file-level clash between
+    /// mods that share no chunk — real, and previously invisible.
     pub pakchunk: i64,
     pub mods: Vec<String>,      // mod ids
     pub mod_names: Vec<String>, // mod names
+    /// The files both mods replace. Empty when the answer is an estimate.
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// True when this came from reading the containers rather than guessing
+    /// from chunk numbers.
+    #[serde(default)]
+    pub certain: bool,
 }
 
 /// One of several interchangeable versions of the same mod inside a single
@@ -505,6 +521,7 @@ fn install_groups(
     let first_pak = mods_dir.join(&pak_files[0]);
     let checksum = sha256_file(&first_pak).unwrap_or_default();
     let pakchunks = extract_pakchunks(&pak_files);
+    let assets = read_mod_assets(mods_dir, &pak_files);
     let mod_id = Uuid::new_v4().to_string();
 
     {
@@ -550,6 +567,10 @@ fn install_groups(
             source_url,
             notes: carried_notes,
             favourite: carried_favourite,
+            // Read once, here: the containers are already on disk, and
+            // re-reading them on every conflict check would mean hundreds of
+            // megabytes per library load.
+            assets,
         };
 
         conn.data.mods.insert(mod_id.clone(), record);
@@ -1045,6 +1066,32 @@ fn trash_dir(active_dir: &Path, mod_id: &str) -> PathBuf {
     active_dir.join(TRASH_ROOT).join(mod_id)
 }
 
+/// Union of every readable container belonging to one mod.
+///
+/// A mod is several files, and they need not agree: one `.pak` may parse while
+/// its sibling does not. Any unreadable container makes the whole answer
+/// unknown, because a partial list would understate what the mod touches and
+/// understating is how a real clash goes unreported.
+fn read_mod_assets(mods_dir: &Path, pak_files: &[String]) -> Option<Vec<String>> {
+    let mut all = Vec::new();
+
+    for name in pak_files {
+        if !name.to_lowercase().ends_with(".pak") {
+            continue;
+        }
+        let paths = crate::pak::read_asset_paths(&mods_dir.join(name))?;
+        all.extend(paths);
+    }
+
+    if all.is_empty() {
+        return None;
+    }
+
+    all.sort();
+    all.dedup();
+    Some(all)
+}
+
 /// Save the user's note for a mod.
 ///
 /// No game-closed guard: this touches only `mods.json`, never a file the game
@@ -1156,29 +1203,155 @@ pub fn set_mod_favourite(
 pub fn detect_conflicts(state: State<AppState>) -> Result<Vec<ConflictInfo>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
 
-    let mut chunk_map: HashMap<i64, Vec<(String, String)>> = HashMap::new();
+    let enabled: Vec<&ModRecord> = conn.data.mods.values().filter(|m| m.enabled).collect();
+    let mut conflicts = Vec::new();
 
-    for m in conn.data.mods.values().filter(|m| m.enabled) {
-        for chunk in &m.pakchunks {
-            chunk_map
-                .entry(*chunk)
-                .or_default()
-                .push((m.id.clone(), m.name.clone()));
+    // ── Pass one: what the mods actually contain ────────────────
+    //
+    // Every readable pair is compared file by file. This catches clashes the
+    // chunk comparison never could — two mods replacing the same asset from
+    // different chunks — and clears the false alarms it used to raise.
+    let mut resolved: std::collections::HashSet<(usize, usize)> = Default::default();
+
+    for (i, a) in enabled.iter().enumerate() {
+        for (j, b) in enabled.iter().enumerate().skip(i + 1) {
+            let (Some(a_files), Some(b_files)) = (&a.assets, &b.assets) else {
+                continue; // one of them is unreadable — pass two decides
+            };
+
+            // Both readable: whatever this pair does, it is now known, and the
+            // chunk comparison must not second-guess it.
+            resolved.insert((i, j));
+
+            let b_set: std::collections::HashSet<&String> = b_files.iter().collect();
+            let shared: Vec<String> =
+                a_files.iter().filter(|f| b_set.contains(*f)).cloned().collect();
+
+            if shared.is_empty() {
+                continue;
+            }
+
+            // A file-level clash is not owned by any one chunk; -1 says so.
+            let chunk = a
+                .pakchunks
+                .iter()
+                .find(|c| b.pakchunks.contains(c))
+                .copied()
+                .unwrap_or(-1);
+
+            conflicts.push(ConflictInfo {
+                pakchunk: chunk,
+                mods: vec![a.id.clone(), b.id.clone()],
+                mod_names: vec![a.name.clone(), b.name.clone()],
+                files: shared,
+                certain: true,
+            });
         }
     }
 
-    let mut conflicts: Vec<ConflictInfo> = chunk_map
+    // ── Pass two: the pairs we could not read ───────────────────
+    //
+    // Falls back to the old rule and says so. Never worse than before: a pair
+    // that used to be reported still is, just labelled an estimate.
+    let mut chunk_map: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (index, m) in enabled.iter().enumerate() {
+        for chunk in &m.pakchunks {
+            chunk_map.entry(*chunk).or_default().push(index);
+        }
+    }
+
+    let mut estimated: Vec<ConflictInfo> = chunk_map
         .into_iter()
-        .filter(|(_, entries)| entries.len() > 1)
-        .map(|(chunk, entries)| ConflictInfo {
-            pakchunk: chunk,
-            mods: entries.iter().map(|(id, _)| id.clone()).collect(),
-            mod_names: entries.into_iter().map(|(_, name)| name).collect(),
+        .filter_map(|(chunk, members)| {
+            // Only the members whose pairing is still unknown.
+            let unknown: Vec<usize> = members
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    members.iter().any(|&j| {
+                        i != j && !resolved.contains(&(i.min(j), i.max(j)))
+                    })
+                })
+                .collect();
+
+            if unknown.len() < 2 {
+                return None;
+            }
+
+            Some(ConflictInfo {
+                pakchunk: chunk,
+                mods: unknown.iter().map(|&i| enabled[i].id.clone()).collect(),
+                mod_names: unknown.iter().map(|&i| enabled[i].name.clone()).collect(),
+                files: Vec::new(),
+                certain: false,
+            })
         })
         .collect();
 
-    conflicts.sort_by_key(|c| c.pakchunk);
+    conflicts.append(&mut estimated);
+    conflicts.sort_by_key(|c| (c.pakchunk, c.mod_names.join("")));
     Ok(conflicts)
+}
+
+/// Read the containers of mods installed before this version and cache the
+/// result, once.
+///
+/// Runs at startup rather than lazily so the first conflict check after
+/// updating is already accurate. Only mods with no cached answer are touched,
+/// so it costs nothing on every later launch.
+pub fn backfill_assets(state: &State<AppState>) {
+    let Ok(mut conn) = state.db.lock() else { return };
+
+    let game_path = conn.get_setting("game_path").unwrap_or_default();
+    if game_path.trim().is_empty() {
+        return;
+    }
+    let mods_dir = get_mods_dir(&game_path);
+
+    let pending: Vec<(String, Vec<String>)> = conn
+        .data
+        .mods
+        .values()
+        .filter(|m| m.assets.is_none())
+        .map(|m| (m.id.clone(), m.installed_filenames.clone()))
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut read = 0;
+    for (id, files) in pending {
+        // On-disk names carry the load-order suffix, so resolve by base rather
+        // than by the name recorded at install.
+        let on_disk = resolve_current_names(&mods_dir, &files);
+        if let Some(assets) = read_mod_assets(&mods_dir, &on_disk) {
+            if let Some(record) = conn.data.mods.get_mut(&id) {
+                record.assets = Some(assets);
+                read += 1;
+            }
+        }
+    }
+
+    log::info!("asset backfill: {read} mods now have a readable file list");
+    let _ = conn.save();
+}
+
+/// Map recorded filenames onto whatever they are called on disk right now.
+fn resolve_current_names(mods_dir: &Path, recorded: &[String]) -> Vec<String> {
+    let on_disk = read_mod_files(mods_dir);
+
+    recorded
+        .iter()
+        .filter_map(|name| base_of(name))
+        .filter_map(|base| {
+            on_disk
+                .iter()
+                .find(|f| f.base == base && f.ext == "pak")
+                .and_then(|f| f.path.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .collect()
 }
 
 /// Apply load order by renaming files with `_NNN_P` priority suffixes.

@@ -239,13 +239,21 @@ function ModCardBase({
               (overriddenBy ? (
                 <ConflictBadge
                   chunks={contested}
+                  files={standing?.files}
+                  certain={standing?.certain}
                   overriddenBy={overriddenBy}
                   overriddenByPosition={standing?.overriddenByPosition}
                 />
               ) : (
                 <span
                   className="chip flex-shrink-0 border-success/25 bg-success/10 text-success"
-                  title={`This mod wins pakchunk ${contested.join(", ")} because it sits higher in the load order`}
+                  title={
+                    standing?.certain
+                      ? `Wins the ${standing.files?.length ?? 0} file${
+                          (standing.files?.length ?? 0) === 1 ? "" : "s"
+                        } it shares with another mod, because it sits higher in the load order`
+                      : `Probably wins pakchunk ${contested.join(", ")} — estimated, the contents could not be read`
+                  }
                 >
                   Applied
                 </span>

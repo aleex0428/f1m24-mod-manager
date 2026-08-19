@@ -11,6 +11,7 @@ mod launcher;
 mod mod_manager;
 mod mod_updater;
 mod notify;
+mod pak;
 mod profiles;
 mod scraper_backend;
 
@@ -188,6 +189,13 @@ pub fn run() {
                         mod_manager::empty_trash(&normalized);
                     }
                 }
+            }
+
+            // Mods installed before this version have no cached file list.
+            // Read them once, now, so the first conflict check after updating
+            // is already accurate rather than an estimate.
+            if let Some(state) = app.try_state::<AppState>() {
+                mod_manager::backfill_assets(&state);
             }
 
             #[cfg(any(windows, target_os = "linux"))]

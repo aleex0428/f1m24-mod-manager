@@ -37,6 +37,8 @@ export function CompatibilityView() {
 
         return {
           pakchunk: conflict.pakchunk,
+          files: conflict.files,
+          certain: conflict.certain,
           winner: names.get(winner) ?? "Unknown",
           losers: contenders.filter((id) => id !== winner).map((id) => names.get(id) ?? "Unknown"),
         };
@@ -69,11 +71,26 @@ export function CompatibilityView() {
       </header>
 
       <ul className="divide-y divide-border-subtle">
-        {groups.map((group) => (
-          <li key={group.pakchunk} className="px-4 py-3">
-            <p className="mb-2 font-mono text-2xs uppercase tracking-wider text-text-muted">
-              pakchunk {group.pakchunk}
-            </p>
+        {groups.map((group, index) => (
+          <li key={`${group.pakchunk}-${index}`} className="px-4 py-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <p className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+                {group.pakchunk >= 0 ? `pakchunk ${group.pakchunk}` : "shared files"}
+              </p>
+              {/* Fact and guess look different on purpose. */}
+              {group.certain ? (
+                <span className="chip border-info/25 bg-info/10 text-info">
+                  {group.files.length} file{group.files.length === 1 ? "" : "s"} in common
+                </span>
+              ) : (
+                <span
+                  className="chip border-border bg-surface-raised text-text-muted"
+                  title="These mods claim the same pakchunk, but their contents could not be read — they may not touch the same files at all."
+                >
+                  Estimated
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-2">
               <Icon name="check-circle" size={15} className="flex-shrink-0 text-success" />
@@ -99,13 +116,38 @@ export function CompatibilityView() {
                 </li>
               ))}
             </ul>
+
+            {group.certain && group.files.length > 0 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-2xs text-text-muted hover:text-text-secondary">
+                  Which files
+                </summary>
+                <ul className="mt-1.5 space-y-0.5">
+                  {group.files.slice(0, 12).map((file) => (
+                    <li
+                      key={file}
+                      className="truncate font-mono text-2xs text-text-muted"
+                      title={file}
+                    >
+                      {file}
+                    </li>
+                  ))}
+                  {group.files.length > 12 && (
+                    <li className="text-2xs text-text-muted">
+                      …and {group.files.length - 12} more
+                    </li>
+                  )}
+                </ul>
+              </details>
+            )}
           </li>
         ))}
       </ul>
 
       <footer className="border-t border-border-subtle px-4 py-2.5 text-2xs leading-relaxed text-text-muted">
-        Only the mod highest in the load order applies to a contested chunk. Move a mod up to make
-        it win, or disable the ones you do not want.
+        Only the mod highest in the load order applies. Move a mod up to make it win, or disable
+        the ones you do not want. Entries marked <span className="text-text-secondary">Estimated</span>{" "}
+        share a pakchunk but their contents could not be read, so they may not clash at all.
       </footer>
     </section>
   );

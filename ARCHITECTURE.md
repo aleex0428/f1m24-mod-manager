@@ -321,6 +321,37 @@ Anything the *user* authored (notes, favourites) must also survive a mod being
 updated, which deletes the old record and writes a new one. `install_groups`
 reads those fields before the delete and carries them across.
 
+## Reading inside a mod (`pak.rs`)
+Conflict detection compares the *files* mods contain, not their pakchunk
+numbers. A `.pak` is an Unreal container whose index lists its contents;
+`pak.rs` reads that index. Verified against real F1 Manager 24 mods: version 11,
+unencrypted, full directory index.
+
+- **`None` means "cannot tell", and every failure returns it.** Encrypted,
+  older than version 10 (before the full directory index), unexpected shape —
+  all `None`. The caller then compares pakchunks and marks the answer
+  `certain: false`. That is what makes this strictly additive: it can add
+  certainty, never remove it.
+- **An empty list is also `None`.** Mods shipping IoStore containers keep their
+  content in the `.ucas`/`.utoc` pair and leave a stub `.pak` that parses
+  cleanly and lists nothing. Believing it would mean concluding the mod touches
+  no files and clearing every clash it is in — a silent regression dressed as
+  certainty. This was found by running the parser against a real mod, not by
+  reasoning about the format.
+- Any unreadable container makes the **whole mod** unknown. A partial list
+  understates what a mod touches, and understating is how a real clash goes
+  unreported.
+- Paths are lowercased and stripped of the mount point's `../../../` so two
+  mods spelling the same location differently still compare equal.
+- Every read is bounds-checked and returns `None` past the end. These are files
+  downloaded from the internet; a truncated one must not panic, and there is a
+  test that truncates at every byte.
+- The list is cached on `ModRecord.assets` at install time — re-reading
+  hundreds of megabytes per library load is not an option. `backfill_assets`
+  fills it once at startup for mods installed before 1.1.0.
+- `ConflictInfo.pakchunk` is `-1` for a file-level clash between mods that
+  share no chunk. Those were invisible before.
+
 ## Bars above the list
 Every notice was added on its own merit; together they could stack twelve deep
 (nine in the library, three in the shell) and leave a 600px-tall window — the

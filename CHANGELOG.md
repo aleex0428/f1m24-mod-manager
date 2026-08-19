@@ -24,6 +24,15 @@ All notable changes to F1M24 Mod Manager are documented here.
   applying stay separate decisions. The file never contains the mods
   themselves, so nobody's work gets redistributed and every download still goes
   through its author's page.
+- **Conflicts are worked out by reading what is inside a mod.** Until now
+  "conflict" meant two mods claiming the same pakchunk, which is a proxy rather
+  than an answer: mods on the same chunk often touch completely different
+  files, and mods on different chunks can quietly replace the same ones. The
+  app now reads each mod's container when it is installed and compares the
+  actual file lists, so it tells you *which* files two mods both replace — and
+  stops warning about pairs that never overlapped. Where a container cannot be
+  read the old pakchunk comparison still applies and the warning says it is an
+  estimate, so this only ever adds certainty.
 - **You can see what the load order is doing.** A mod that is switched on but
   covered by another now says so on its own row — an amber marker instead of
   the red one, and a badge pointing at the row number that beats it. Being

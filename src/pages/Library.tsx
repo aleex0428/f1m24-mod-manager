@@ -162,7 +162,14 @@ export function Library() {
 
       for (const id of contenders) {
         const entry = map.get(id) ?? { chunks: [] };
-        entry.chunks.push(conflict.pakchunk);
+        // -1 means the clash is file-level and belongs to no chunk.
+        if (conflict.pakchunk >= 0) entry.chunks.push(conflict.pakchunk);
+        if (conflict.files.length > 0) {
+          entry.files = [...new Set([...(entry.files ?? []), ...conflict.files])];
+        }
+        // One measured clash makes the whole standing measured: an estimate
+        // alongside a fact should not downgrade the fact.
+        entry.certain = entry.certain || conflict.certain;
         if (id !== winner) {
           entry.overriddenBy = names.get(winner);
           entry.overriddenByPosition = position.get(winner);

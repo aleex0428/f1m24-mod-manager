@@ -47,6 +47,16 @@ pub struct ModRecord {
     /// Pinned by the user, for the handful they actually care about.
     #[serde(default)]
     pub favourite: bool,
+    /// Every file this mod's containers hold, read once at install.
+    ///
+    /// `None` means the containers could not be read — encrypted, an
+    /// unsupported layout, or an IoStore pair whose `.pak` is a stub. That is
+    /// deliberately different from `Some(vec![])`, which never occurs: an empty
+    /// list would claim the mod touches nothing, and conflict detection would
+    /// clear every clash it is part of. `None` degrades to comparing pakchunks
+    /// and says the result is an estimate.
+    #[serde(default)]
+    pub assets: Option<Vec<String>>,
 }
 
 /// A named set of mods to have active, and the order to load them in.
