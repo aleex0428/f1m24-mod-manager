@@ -352,6 +352,27 @@ unencrypted, full directory index.
 - `ConflictInfo.pakchunk` is `-1` for a file-level clash between mods that
   share no chunk. Those were invisible before.
 
+## Motion
+Movement is functional here: it exists to explain a change, never to decorate.
+
+- `useListTransition` is FLIP — measure, let React render, animate each row
+  from its old box to its new one with the Web Animations API. **Disabled while
+  dragging**, because dnd-kit already owns those transforms and two systems
+  animating one element fight.
+- `Collapse` animates real height, then releases to `auto`. Pinning the
+  measured pixel height permanently would clip a notice whose text later wraps
+  differently. It also never animates on first render — a panel that opens by
+  itself on mount reads as a glitch.
+- `ModCover` fades an image in over the colour its generated poster would have
+  used. The `ref` callback checking `img.complete` is load-bearing: a cached
+  image fires `onLoad` before React attaches the handler, and without it the
+  picture stays at opacity 0 forever. Covers repeat constantly, so that is the
+  common path.
+- The animation tokens in `tailwind.config.js` are only the ones in use. Five
+  were defined and never referenced once; a design system that advertises
+  animations nothing performs is lying about what the app does.
+- `.pressable` is the press state for anything clickable that is not a `.btn`.
+
 ## Bars above the list
 Every notice was added on its own merit; together they could stack twelve deep
 (nine in the library, three in the shell) and leave a 600px-tall window — the

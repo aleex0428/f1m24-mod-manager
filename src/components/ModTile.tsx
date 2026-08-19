@@ -52,6 +52,7 @@ function ModTileBase({
     <>
       <article
         style={{ "--i": index } as React.CSSProperties}
+        data-row-id={mod.id}
         onContextMenu={(e) => onContextMenu?.(e, mod)}
         className={`stagger cv-auto-tile group relative flex flex-col overflow-hidden rounded-2xl border bg-surface/60 shadow-elev-1 transition-colors duration-base ${
           selected

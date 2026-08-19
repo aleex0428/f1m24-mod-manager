@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import toast from "react-hot-toast";
 
 import { Icon } from "./Icon";
+import { Skeleton } from "./Skeleton";
 import { Modal, ModalHeader } from "./Modal";
 import { ImportProfileModal } from "./ImportProfileModal";
 import { useModStore } from "../store/modStore";
@@ -24,6 +25,7 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
   const [isSaveOpen, setIsSaveOpen] = useState(false);
   const [pendingApply, setPendingApply] = useState<Profile | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -38,6 +40,7 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
     ]);
     setProfiles(list);
     setActiveId(active);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -163,7 +166,14 @@ export function ProfileBar({ onApplied }: { onApplied: () => Promise<void> | voi
           Profile
         </span>
 
-        {profiles.length === 0 ? (
+        {loading ? (
+          // "None yet" while the query is still in flight is not an empty
+          // state, it is a wrong answer shown confidently.
+          <span className="flex items-center gap-1.5">
+            <Skeleton className="h-6 w-28 !rounded-full" />
+            <Skeleton className="h-6 w-20 !rounded-full" />
+          </span>
+        ) : profiles.length === 0 ? (
           <span className="text-xs text-text-muted">
             None yet — save your current setup to switch back to it later.
           </span>

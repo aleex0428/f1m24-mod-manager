@@ -7,6 +7,7 @@ import { InstallFromUrlModal } from "../components/InstallFromUrlModal";
 import { Skeleton } from "../components/Skeleton";
 import { Icon } from "../components/Icon";
 import { ModCover } from "../components/ModCover";
+import { EmptyState, EmptyCatalogueArt, NoResultsArt } from "../components/EmptyState";
 import { useModStore } from "../store/modStore";
 import { enqueueDownload } from "../lib/queue";
 import { linkOvertakeAccount } from "../lib/auth";
@@ -492,12 +493,6 @@ const CatalogTile = memo(function CatalogTile({ mod, index, installed, onInstall
           className="absolute inset-0 h-full w-full"
         />
 
-        {/* The description only earns space when you are looking at this one. */}
-        {mod.description && (
-          <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/90 via-black/60 to-transparent p-3 opacity-0 transition-opacity duration-base group-hover:opacity-100">
-            <p className="clamp-2 text-xs leading-snug text-white/90">{mod.description}</p>
-          </div>
-        )}
 
         {installed && !busyLabel && (
           <span className="absolute left-2.5 top-2.5 flex items-center gap-1 rounded-lg bg-success/90 px-2 py-1 text-2xs font-semibold uppercase tracking-wider text-black">
@@ -512,6 +507,9 @@ const CatalogTile = memo(function CatalogTile({ mod, index, installed, onInstall
           </span>
         )}
 
+        {/* Secondary by design: opening the page is the one action that can
+            wait for you to point at the card. The description and Install do
+            not, which is why they are always on. */}
         <button
           onClick={() => shellOpen(mod.url).catch(() => {})}
           className="absolute right-2.5 bottom-2.5 rounded-lg bg-black/70 p-1.5 text-white opacity-0 transition-opacity duration-base hover:bg-black/90 group-hover:opacity-100 focus-visible:opacity-100"
@@ -539,6 +537,15 @@ const CatalogTile = memo(function CatalogTile({ mod, index, installed, onInstall
           {mod.author ? `by ${mod.author}` : "Unknown author"}
           {mod.lastUpdated && ` · ${mod.lastUpdated}`}
         </p>
+
+        {/* Always visible. Browsing is how you decide what to install, and
+            requiring a hover per card to read what something *is* turns
+            discovery into fifty deliberate gestures. */}
+        {mod.description && (
+          <p className="clamp-2 text-2xs leading-snug text-text-muted/80" title={mod.description}>
+            {mod.description}
+          </p>
+        )}
 
         <div className="mt-auto flex items-center gap-2 pt-2">
           <span className="flex items-center gap-1 font-mono text-2xs text-text-muted">
@@ -582,31 +589,49 @@ function EmptyCatalog({
   onShowAll: () => void;
   isSyncing: boolean;
 }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center py-20 text-center text-text-muted">
-      <Icon name="inbox" size={48} className="mb-4 opacity-40" />
-      {isFiltered ? (
-        <>
-          <p className="text-sm">Everything here is already in your library.</p>
-          <button onClick={onShowAll} className="btn-subtle mt-2 !text-xs">
+  if (isFiltered) {
+    return (
+      <EmptyState
+        art={<NoResultsArt />}
+        title="You already have all of these"
+        description="Every mod matching your search is in your library. Turn the filter off to see them alongside the rest."
+        action={
+          <button onClick={onShowAll} className="btn-ghost">
             Show installed mods too
           </button>
-        </>
-      ) : isSearching ? (
-        <p className="text-sm">No cached mod matches that search.</p>
-      ) : (
-        <>
-          <p className="text-sm font-medium text-text-secondary">The local catalog is empty</p>
-          <p className="mb-5 mt-1 text-xs">
-            Sync once to pull the F1 Manager 2024 downloads section from Overtake.gg.
-          </p>
-          <button onClick={onSync} disabled={isSyncing} className="btn-primary">
+        }
+      />
+    );
+  }
+
+  if (isSearching) {
+    return (
+      <EmptyState
+        art={<NoResultsArt />}
+        title="Nothing matches that"
+        description="No mod in your local copy of the catalogue has that in its name, author or description. If it is new, a sync may not have picked it up yet."
+        action={
+          <button onClick={onSync} disabled={isSyncing} className="btn-ghost">
             <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
-            Sync catalog
+            Sync the catalogue
           </button>
-        </>
-      )}
-    </div>
+        }
+      />
+    );
+  }
+
+  return (
+    <EmptyState
+      art={<EmptyCatalogueArt />}
+      title="Nothing here yet"
+      description="Sync once to pull the F1 Manager 2024 downloads section from Overtake.gg. It is kept on your machine, so browsing and searching work offline afterwards."
+      action={
+        <button onClick={onSync} disabled={isSyncing} className="btn-primary">
+          <Icon name="refresh" size={16} className={isSyncing ? "animate-spin" : ""} />
+          Sync catalog
+        </button>
+      }
+    />
   );
 }
 

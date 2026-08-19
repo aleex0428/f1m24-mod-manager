@@ -43,7 +43,7 @@ export function LibrarySummary({
     return (
       <button
         onClick={() => setCollapsed(false)}
-        className="flex flex-shrink-0 items-center gap-3 border-b border-border/70 px-6 py-1.5 text-left text-2xs text-text-muted transition-colors hover:bg-surface/40"
+        className="pressable flex flex-shrink-0 items-center gap-3 border-b border-border/70 px-6 py-1.5 text-left text-2xs text-text-muted hover:bg-surface/40"
         aria-expanded={false}
       >
         <span className="font-mono text-text-secondary">
@@ -155,7 +155,7 @@ function Tile({
     <Element
       onClick={onClick}
       aria-pressed={onClick && selected !== undefined ? selected : undefined}
-      className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors duration-fast ${
+      className={`pressable flex items-center gap-3 rounded-xl border px-3 py-2 text-left ${
         selected
           ? "border-f1red/45 bg-f1red/10"
           : "border-border-subtle bg-surface/50"
@@ -168,7 +168,7 @@ function Tile({
       </span>
       <span className="min-w-0">
         <span className="flex items-baseline gap-1.5">
-          <span className="font-display text-lg font-bold leading-none text-text-primary">
+          <span className="font-display text-2xl font-bold leading-none text-text-primary">
             {value}
           </span>
           <span className="text-2xs uppercase tracking-wider text-text-muted">{label}</span>

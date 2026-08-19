@@ -114,18 +114,17 @@ export default {
         "in-out-soft": "cubic-bezier(0.4, 0, 0.2, 1)",
       },
 
+      /* Only what is actually used. Five tokens here were never referenced
+         once — a design system that advertises animations nothing performs is
+         lying about what the app does, and the next person reaches for one
+         expecting it to be established. `sweep` and `rowIn` are driven from
+         index.css rather than by class, so they live in keyframes only. */
       animation: {
         "fade-in": "fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
         "slide-up": "slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
         "slide-in": "slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
         "slide-down": "slideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
         "scale-in": "scaleIn 0.16s cubic-bezier(0.16, 1, 0.3, 1)",
-        "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-        "spin-slow": "spin 3s linear infinite",
-        sweep: "sweep 1.4s linear infinite",
-        "bar-stripes": "barStripes 1s linear infinite",
-        /* Rows enter with a delay set per index — see `.stagger` in index.css. */
-        "row-in": "rowIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) backwards",
       },
       keyframes: {
         fadeIn: {
@@ -155,10 +154,6 @@ export default {
         sweep: {
           "0%": { transform: "translateX(-100%)" },
           "100%": { transform: "translateX(400%)" },
-        },
-        barStripes: {
-          "0%": { backgroundPosition: "0 0" },
-          "100%": { backgroundPosition: "28px 0" },
         },
       },
 

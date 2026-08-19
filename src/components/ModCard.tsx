@@ -75,6 +75,7 @@ function ModCardBase({
             "--i": index,
           } as React.CSSProperties
         }
+        data-row-id={mod.id}
         onContextMenu={(e) => onContextMenu?.(e, mod)}
         className={`stagger group relative flex items-stretch overflow-hidden rounded-2xl border bg-surface/60 transition-colors duration-base ${
           dropEdge ? `drop-indicator drop-indicator-${dropEdge}` : ""
@@ -168,8 +169,11 @@ function ModCardBase({
 
           {/* Dragging is fine for a nudge; these are for moving across a long
               list without fighting the scroll. */}
+          {/* Nudging up and down is a refinement, not something you need in
+              view at rest. Still in the context menu and the palette, so
+              nothing becomes unreachable — the row just stops shouting. */}
           {onMove && !compact && (
-            <div className="flex flex-col">
+            <div className="flex flex-col opacity-0 transition-opacity duration-fast group-hover:opacity-100 focus-within:opacity-100">
               <button
                 onClick={() => onMove(mod.id, "up")}
                 disabled={isFirst}
@@ -216,8 +220,10 @@ function ModCardBase({
           title="Open details"
         >
           <div className="flex min-w-0 items-center gap-2">
+            {/* The name is what the row is about. It was 15px among a dozen
+                12px labels, which is not a hierarchy. */}
             <h3
-              className={`truncate font-semibold ${compact ? "text-sm" : "text-md"} ${
+              className={`truncate font-semibold ${compact ? "text-sm" : "text-lg"} ${
                 mod.enabled ? "text-text-primary" : "text-text-secondary"
               }`}
               title={mod.name}
@@ -261,7 +267,7 @@ function ModCardBase({
           </div>
 
           <div
-            className={`flex min-w-0 flex-wrap items-center gap-x-3 text-xs text-text-muted ${
+            className={`flex min-w-0 flex-wrap items-center gap-x-3 text-xs text-text-muted/80 ${
               compact ? "gap-y-0" : "gap-y-1"
             }`}
           >
@@ -298,7 +304,7 @@ function ModCardBase({
             <span className="toggle-slider" />
           </label>
 
-          <div className="flex overflow-hidden rounded-lg border border-border">
+          <div className="flex overflow-hidden rounded-lg border border-border opacity-0 transition-opacity duration-fast group-hover:opacity-100 focus-within:opacity-100">
             {onOpenFolder && !compact && (
               <button
                 onClick={onOpenFolder}

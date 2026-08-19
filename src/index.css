@@ -125,6 +125,13 @@ textarea:focus-visible {
     @apply rounded-2xl border border-border bg-surface/70 shadow-elev-1;
   }
 
+  /* A row in a long list. Flat on purpose: elevation should mean "this is
+     above that", and a hundred raised rows mean nothing at all. */
+  .row {
+    @apply rounded-2xl border border-border bg-surface/60 shadow-elev-0
+           transition-colors duration-base ease-out-expo;
+  }
+
   .panel-hover {
     @apply transition-colors duration-base ease-out-expo
            hover:border-border-strong hover:bg-surface-raised/70;
@@ -187,8 +194,9 @@ textarea:focus-visible {
   .filter-chip {
     @apply inline-flex select-none items-center gap-1.5 rounded-full border border-border
            bg-surface/60 px-3 py-1 text-xs font-medium text-text-secondary
-           transition-colors duration-fast
-           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary;
+           transition-all duration-fast
+           hover:border-border-strong hover:bg-surface-raised hover:text-text-primary
+           active:translate-y-px;
   }
 
   .filter-chip-active {
@@ -203,13 +211,14 @@ textarea:focus-visible {
   /* Floating menu surface — context menus, dropdowns, the palette. */
   .menu {
     @apply min-w-[11rem] overflow-hidden rounded-xl border border-border-strong
-           bg-surface-raised p-1 shadow-elev-3;
+           bg-surface-raised p-1 shadow-elev-2;
   }
 
   .menu-item {
     @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
-           text-text-secondary transition-colors duration-fast
+           text-text-secondary transition-all duration-fast
            hover:bg-surface-overlay hover:text-text-primary
+           active:translate-y-px
            disabled:pointer-events-none disabled:opacity-40;
   }
 
@@ -219,6 +228,13 @@ textarea:focus-visible {
 
   .menu-separator {
     @apply my-1 h-px bg-border;
+  }
+
+  /* Anything clickable that is not a button: cards, tiles, summary figures.
+     Seventeen components had a hover state and two had a press state, which is
+     the difference between an interface that responds and a picture of one. */
+  .pressable {
+    @apply transition-all duration-fast ease-out-expo active:translate-y-px;
   }
 
   /* Keyboard hint. */

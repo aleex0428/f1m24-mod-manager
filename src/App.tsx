@@ -64,6 +64,7 @@ function AppShell() {
   const activeJobCount = useModStore(selectActiveJobCount);
   const gamePathValid = useModStore((s) => s.gamePathValid);
   const gameRunning = useModStore((s) => s.gameRunning);
+  const activeMods = useModStore((s) => s.mods.filter((m) => m.enabled).length);
   const { conflicts, loadMods } = useMods();
 
   useDownload();
@@ -318,7 +319,12 @@ function AppShell() {
               F1 MANAGER 24
             </span>
             <span className="h-3.5 w-px bg-border" />
-            <span className="truncate text-sm text-text-muted">Mod Manager</span>
+            {/* A title bar is on screen the whole time on every page, so it
+                earns its place by saying something that changes rather than by
+                repeating the app's own name back at you. */}
+            <span className="truncate text-sm text-text-muted">
+              {activeMods > 0 ? `${activeMods} mods active` : "Mod Manager"}
+            </span>
           </div>
 
           <div className="no-drag flex min-w-0 items-center gap-2 pr-0">

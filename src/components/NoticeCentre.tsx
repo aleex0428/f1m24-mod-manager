@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
+import { Collapse } from "./Collapse";
 
 export interface Notice {
   id: string;
@@ -50,7 +51,7 @@ export function NoticeCentre({ notices }: { notices: Notice[] }) {
       <button
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 px-6 py-2 text-left text-xs transition-colors hover:bg-white/[0.03]"
+        className="pressable flex w-full items-center gap-2 px-6 py-2 text-left text-xs hover:bg-white/[0.03]"
       >
         <Icon name="warning-solid" size={16} className={tone.text} />
         <span className={`flex-1 font-medium ${tone.text}`}>
@@ -62,13 +63,13 @@ export function NoticeCentre({ notices }: { notices: Notice[] }) {
         </span>
       </button>
 
-      {expanded && (
+      <Collapse open={expanded}>
         <div className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
           {notices.map((notice) => (
             <NoticeRow key={notice.id} notice={notice} nested />
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

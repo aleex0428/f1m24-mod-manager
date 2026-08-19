@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { bestImageUrl, hueFor, initialsFor } from "../lib/images";
 
 interface ModCoverProps {
@@ -39,36 +39,59 @@ interface ModCoverProps {
  */
 function ModCoverBase({ src, name, mode = "fit", className = "", reactive }: ModCoverProps) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const url = failed ? undefined : bestImageUrl(src);
+
+  // The hue the generated poster would have used. Showing it while the image
+  // is in flight means a grid of fifty tiles is never a grid of grey holes,
+  // and each one already carries the colour it is about to become.
+  const hue = hueFor(name);
+  const placeholder = `linear-gradient(135deg, hsl(${hue} 42% 26%) 0%, hsl(${
+    (hue + 40) % 360
+  } 38% 14%) 100%)`;
+
+  /**
+   * A cached image can finish loading before React attaches `onLoad`, and the
+   * event never fires — leaving the picture at opacity 0 forever. Covers repeat
+   * constantly here, so this is the common path, not the edge case: the ref
+   * checks `complete` the moment the element exists.
+   */
+  const markLoaded = useCallback((node: HTMLImageElement | null) => {
+    if (node?.complete) setLoaded(true);
+  }, []);
 
   if (!url) return <GeneratedPoster name={name} className={className} />;
 
   if (mode === "fill") {
     return (
-      <span className={`block overflow-hidden bg-bg-elevated ${className}`}>
+      <span className={`block overflow-hidden ${className}`} style={{ background: placeholder }}>
         <img
+          ref={markLoaded}
           src={url}
           alt=""
           loading="lazy"
           decoding="async"
+          onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
-          className="h-full w-full object-cover"
+          className={`h-full w-full object-cover transition-opacity duration-base ease-out-expo ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
         />
       </span>
     );
   }
 
   return (
-    <span className={`relative block overflow-hidden bg-bg-elevated ${className}`}>
+    <span className={`relative block overflow-hidden ${className}`} style={{ background: placeholder }}>
       {/* Backdrop: the same file, blown up and blurred into a colour wash.
           Cheap because the source is 96px — there is very little to blur. */}
       {/* The base scale is a class, not an inline style: an inline `transform`
           would win over the hover utility and the card would never react. */}
       <span
         aria-hidden="true"
-        className={`absolute inset-0 scale-[1.8] bg-cover bg-center transition-transform duration-slow ease-out-expo ${
+        className={`absolute inset-0 scale-[1.8] bg-cover bg-center transition-all duration-slow ease-out-expo ${
           reactive ? "group-hover:scale-[2.1]" : ""
-        }`}
+        } ${loaded ? "opacity-100" : "opacity-0"}`}
         style={{
           backgroundImage: `url(${url})`,
           filter: "blur(22px) saturate(1.5) brightness(0.55)",
@@ -77,12 +100,16 @@ function ModCoverBase({ src, name, mode = "fit", className = "", reactive }: Mod
 
       {/* The readable copy, at its own resolution and no larger. */}
       <img
+        ref={markLoaded}
         src={url}
         alt=""
         loading="lazy"
         decoding="async"
+        onLoad={() => setLoaded(true)}
         onError={() => setFailed(true)}
-        className="absolute left-1/2 top-1/2 max-h-[86%] max-w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-elev-2"
+        className={`absolute left-1/2 top-1/2 max-h-[86%] max-w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-elev-2 transition-opacity duration-base ease-out-expo ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
       />
     </span>
   );

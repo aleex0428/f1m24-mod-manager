@@ -27,6 +27,7 @@ import { ModTile } from "../components/ModTile";
 import { CompatibilityView } from "../components/CompatibilityView";
 import { GetStarted } from "../components/GetStarted";
 import { Skeleton } from "../components/Skeleton";
+import { EmptyState, NoResultsArt } from "../components/EmptyState";
 import { LibrarySummary } from "../components/LibrarySummary";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { NoticeCentre, type Notice } from "../components/NoticeCentre";
@@ -36,6 +37,7 @@ import { useContextMenu, type MenuAction } from "../components/ContextMenu";
 import { useModStore } from "../store/modStore";
 import { useMods } from "../hooks/useMods";
 import { usePreference } from "../hooks/usePreference";
+import { useListTransition } from "../hooks/useListTransition";
 import { installLocalFile } from "../lib/install";
 import { uninstallMod, uninstallMods } from "../lib/modActions";
 import type { ConflictStanding, Mod, UpdateAvailable } from "../types";
@@ -127,6 +129,7 @@ export function Library() {
   );
 
   const orderSignature = useRef("");
+  const listRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const lastClickedRef = useRef<string | null>(null);
   const menu = useContextMenu();
@@ -671,6 +674,10 @@ export function Library() {
     [draggingId, overId, localOrder]
   );
 
+  // Rows slide to their new places when the list is filtered or re-sorted.
+  // Off during a drag, when dnd-kit is already transforming the same elements.
+  useListTransition(listRef, visibleMods.map((m) => m.id).join("|"), draggingId === null);
+
   const listBody = visibleMods.map((mod, index) => {
     const position = localOrder.indexOf(mod.id);
     return (
@@ -1021,7 +1028,7 @@ export function Library() {
       )}
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-4">
         {showConflicts && conflicts.length > 0 && (
           <div className="mb-4">
             <CompatibilityView />
@@ -1042,23 +1049,29 @@ export function Library() {
             </button>
           </div>
         ) : visibleMods.length === 0 ? (
-          <div className="py-16 text-center">
-            <p className="text-sm text-text-muted">
-              {normalizedQuery
-                ? `No mod matches “${query}”.`
-                : `No mod is ${FILTER_LABELS[filter].toLowerCase()}.`}
-            </p>
-            <button
-              onClick={() => {
-                setQuery("");
-                setFilter("all");
-                setTagFilter(null);
-              }}
-              className="btn-subtle mt-2 !text-xs"
-            >
-              Clear the filters
-            </button>
-          </div>
+          <EmptyState
+            art={<NoResultsArt />}
+            title={normalizedQuery ? "Nothing matches that" : "Nothing in that group"}
+            description={
+              normalizedQuery
+                ? `None of your ${mods.length} installed mods has “${query}” in its name or author.`
+                : `None of your ${mods.length} installed mods is ${FILTER_LABELS[
+                    filter
+                  ].toLowerCase()}${tagFilter ? ` and tagged “${tagFilter}”` : ""}.`
+            }
+            action={
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setFilter("all");
+                  setTagFilter(null);
+                }}
+                className="btn-ghost"
+              >
+                Clear the filters
+              </button>
+            }
+          />
         ) : isGrid ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3 pb-6">
             {visibleMods.map((mod, index) => (

@@ -4,6 +4,7 @@ import { linkOvertakeAccount } from "../lib/auth";
 import { cancelDownload, retryDownload } from "../hooks/useDownload";
 import { formatBytes, formatSpeed } from "../lib/format";
 import { Icon } from "./Icon";
+import { EmptyState, NoDownloadsArt } from "./EmptyState";
 import { isActiveStatus, type DownloadJob, type DownloadStatus } from "../types";
 
 const STATUS_LABEL: Record<DownloadStatus, string> = {
@@ -137,10 +138,12 @@ export function PitWallDownloads({ isOpen, onClose }: { isOpen: boolean; onClose
         )}
 
         {allJobs.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center px-6 text-center text-text-muted">
-            <Icon name="upload" size={48} className="mb-3 opacity-30" />
-            <p className="text-sm font-medium text-text-secondary">No downloads</p>
-            <p className="mt-1 text-xs">Install a mod from Browse to see it here.</p>
+          <div className="flex-1">
+            <EmptyState
+              art={<NoDownloadsArt />}
+              title="Pit lane is empty"
+              description="Anything you install from Browse appears here while it downloads, and stays until you clear it."
+            />
           </div>
         ) : (
           <div className="flex-1 space-y-2.5 overflow-y-auto p-3">

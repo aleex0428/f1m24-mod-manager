@@ -2,6 +2,44 @@
 
 All notable changes to F1M24 Mod Manager are documented here.
 
+## [1.2.0] — unreleased
+
+### Added
+
+- **Illustrated empty states.** An empty library, a catalogue before its first
+  sync, a search that found nothing and an idle download queue each have their
+  own artwork and a single clear action, instead of a grey icon and one line of
+  text.
+
+### Improved
+
+- **The list moves when you filter it.** Rows used to vanish and the rest snap
+  upwards; now the ones leaving fade and the rest slide into place, so a filter
+  reads as "those were removed" rather than "the list changed".
+- **Mod pictures fade in over their own colour** instead of popping into place
+  one by one as they download. Each tile starts as the shade that mod would
+  have had with no picture at all, so a grid is never a field of grey holes.
+- **Panels open by growing.** The notice strip and the summary animate their
+  height rather than appearing instantly and shoving the list down by fifty
+  pixels with no warning.
+- **Everything you can click now responds to being clicked.** Seventeen
+  components had a hover state and two had a press state.
+- **The mod list has a hierarchy again.** Mod names are larger, the summary
+  figures are larger still, and the metadata recedes — nearly all text sat
+  between 11 and 14 pixels, which is why nothing stood out.
+- **Rows are quieter at rest.** The move, folder and uninstall buttons appear
+  when you point at a row; they remain in the right-click menu and the command
+  palette, so nothing became harder to reach.
+- **Catalogue cards show their description without being pointed at**, because
+  browsing is how you decide what to install and requiring a hover per card
+  turned that into fifty deliberate gestures.
+- **Surfaces have a consistent sense of depth**: flat rows, raised cards,
+  floating menus, modals above everything.
+- **The title bar says how many mods are active** instead of repeating the
+  app's own name back at you.
+- **The profile bar no longer claims you have no profiles while it is still
+  loading them.**
+
 ## [1.1.0] — 2026-08-19
 
 ### Added
