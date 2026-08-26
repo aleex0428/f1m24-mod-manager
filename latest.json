@@ -1,0 +1,15 @@
+{
+  "version": "1.2.0",
+  "notes": "Download `F1M24 Mod Manager_1.2.0_x64-setup.exe` below and run it.\n\nWindows SmartScreen will warn that the publisher is unknown because\nthe installer is not code-signed: **More info → Run anyway**.",
+  "pub_date": "2026-08-26T15:06:39.366Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSZnJjN3Z2MlE2cExtQ3QxMm5jcWplaFkyNXVFSDdBQWF0S2NTSlFnU0dzU2NPdVJpc2RjeitvWE82L09kbzB4bFNKZ1AyeFl1M1JveDhORG9icFgzUnIwYzRUQmo4UHdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NzU2Nzk2CWZpbGU6RjFNMjQgTW9kIE1hbmFnZXJfMS4yLjBfeDY0LXNldHVwLmV4ZQp5Y3ozNW5pTlZIdzd2WUNaME4zQzZLYmF5dFlLblVkcmJaaHhOSnBoVnVQUFgvbWNQL2lVVDlVWENaVHRqQ3FERHlxQ3RJamp6blFlbzlTSlBmOXNCUT09Cg==",
+      "url": "https://github.com/aleex0428/f1m24-mod-manager/releases/download/v1.2.0/F1M24.Mod.Manager_1.2.0_x64-setup.exe"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSZnJjN3Z2MlE2cExtQ3QxMm5jcWplaFkyNXVFSDdBQWF0S2NTSlFnU0dzU2NPdVJpc2RjeitvWE82L09kbzB4bFNKZ1AyeFl1M1JveDhORG9icFgzUnIwYzRUQmo4UHdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NzU2Nzk2CWZpbGU6RjFNMjQgTW9kIE1hbmFnZXJfMS4yLjBfeDY0LXNldHVwLmV4ZQp5Y3ozNW5pTlZIdzd2WUNaME4zQzZLYmF5dFlLblVkcmJaaHhOSnBoVnVQUFgvbWNQL2lVVDlVWENaVHRqQ3FERHlxQ3RJamp6blFlbzlTSlBmOXNCUT09Cg==",
+      "url": "https://github.com/aleex0428/f1m24-mod-manager/releases/download/v1.2.0/F1M24.Mod.Manager_1.2.0_x64-setup.exe"
+    }
+  }
+}
