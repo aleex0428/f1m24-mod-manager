@@ -2,7 +2,7 @@
 
 All notable changes to F1M24 Mod Manager are documented here.
 
-## [1.2.0] — unreleased
+## [1.2.0] — 2026-08-26
 
 ### Added
 
